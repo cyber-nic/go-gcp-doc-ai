@@ -36,34 +36,13 @@ resource "google_storage_bucket" "nlp_output" {
   force_destroy = true
 }
 
-resource "google_pubsub_topic" "ocr_dispatch" {
-  name = "ocr"
+// ocr pubsub
+resource "google_pubsub_schema" "ocr" {
+  name       = "events-schema"
+  type       = "AVRO"
+  definition = file("../apps/dispatcher/event-schema.json")
 }
 
-
-
-resource "google_cloudfunctions2_function" "nlp_worker" {
-  name        = "nlp-worker"
-  location   = local.region
-
-   build_config {
-    runtime = "go121"
-    entry_point = "handler"
-    source {
-      repo_source {
-        project_id  = "my-project-id"
-        repo_name = "my-repo-name"
-        branch_name = "main"
-      }
-    }
-  }
-
-  service_config {
-    # max_instance_count  = 1
-    available_memory    = "128M"
-    timeout_seconds     = 120
-  }
-
-  # Eventarc trigger configuration goes here
-  # ... other configuration ...
+resource "google_pubsub_topic" "ocr_dispatch" {
+  name = "ocr"
 }

@@ -1,4 +1,3 @@
-
 resource "google_service_account" "dispatcher" {
   account_id   = "test-gcf-sa"
   display_name = "Test Service Account"
@@ -13,7 +12,7 @@ resource "google_storage_bucket" "dispatcher" {
 data "archive_file" "dispatcher" {
   type        = "zip"
   output_path = "/tmp/func-nlp-source.zip"
-  source_dir  = "../nlp-worker/"
+  source_dir  = "../apps/nlp-worker/"
 }
 
 resource "google_storage_bucket_object" "dispatcher" {

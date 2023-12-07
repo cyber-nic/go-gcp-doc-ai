@@ -7,7 +7,7 @@ resource "google_service_account" "ocr" {
 data "archive_file" "ocr" {
   type        = "zip"
   output_path = "/tmp/func-ocr-source.zip"
-  source_dir  = "../ocr-worker/"
+  source_dir  = "../apps/ocr-worker/"
 }
 
 resource "google_storage_bucket_object" "ocr" {

@@ -6,11 +6,11 @@ The buckets involved in the data pipeline.
 
 ## src Bucket
 
-Previously named 'SOURCE'. Contains the original 2 million images for processing.
+Contains the original 2 million images for processing.
 
 ## src-refs Bucket
 
-Previously named 'REFS'. Used for deduplication. It stores files named after the CRC32C checksum of each image from the src bucket, with each file's content being the name of the corresponding image file.
+Used for deduplication. It stores files named after the CRC32C checksum of each image from the src bucket, with each file's content being the name of the corresponding image file.
 
 ## ocr-err Bucket
 

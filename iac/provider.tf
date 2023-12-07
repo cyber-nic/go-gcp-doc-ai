@@ -1,6 +1,6 @@
 provider "google" {
   project = "your-gcp-project-id"
-  region  = "eu-west4"
+  region  = "europe-west1"
 }
 
 terraform {

@@ -16,7 +16,7 @@ func TestGetIntEnvVar(t *testing.T) {
 		expect   int
 	}{
 		// happy path. env var is set
-		"value":    {key: "FOO_BAR", expect: 1, fallback: 1, value: "1"},
+		"value": {key: "FOO_BAR", expect: 1, fallback: 1, value: "1"},
 		// env var is not set. fallback is returned
 		"fallback": {key: "BAR_FOO", expect: 10, fallback: 10},
 	}
@@ -45,7 +45,7 @@ func TestGetStrEnvVar(t *testing.T) {
 		expect   string
 	}{
 		// happy path. env var is set
-		"value":    {key: "FOO_BAR", expect: "foo", fallback: "bar", value: "foo"},
+		"value": {key: "FOO_BAR", expect: "foo", fallback: "bar", value: "foo"},
 		// env var is not set. fallback is returned
 		"fallback": {key: "BAR_FOO", expect: "bar", fallback: "bar"},
 	}
@@ -66,8 +66,6 @@ func TestGetStrEnvVar(t *testing.T) {
 	}
 }
 
-
-
 func TestGetBoolEnvVar(t *testing.T) {
 	tests := map[string]struct {
 		key      string
@@ -76,7 +74,7 @@ func TestGetBoolEnvVar(t *testing.T) {
 		expect   bool
 	}{
 		// happy path. env var is set
-		"value":    {key: "FOO_BAR", expect: true, fallback: false, value: true},
+		"value": {key: "FOO_BAR", expect: true, fallback: false, value: true},
 		// env var is not set. fallback is returned
 		"fallback": {key: "BAR_FOO", expect: true, fallback: true},
 	}
@@ -96,5 +94,3 @@ func TestGetBoolEnvVar(t *testing.T) {
 		})
 	}
 }
-
-
