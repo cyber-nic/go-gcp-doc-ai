@@ -1,17 +1,22 @@
 build:
 	go build -o ./bin/app ./src
 
-run-worker:
+test:
+	go test -v ./worker/...
+
+# run-worker
+rw:
 	go run ./worker-cmd
 
-build-worker:
-	go build ./worker-cmd -o ./bin/worker
+run-worker:
+	go run ./worker-cmd
 
 debug:
 	go run ./src -debug=true
 
-test:
-	go test -v ./src/...
+build-worker:
+	go build ./worker-cmd -o ./bin/worker
+
 
 cover:
-	go test -coverprofile=coverage.out && go tool cover -html=coverage.out
+            { "Name": "coverage.out && go tool cover -html=coverage.out
