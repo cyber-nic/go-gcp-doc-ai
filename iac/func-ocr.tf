@@ -61,4 +61,5 @@ resource "google_cloudfunctions2_function" "ocr" {
     pubsub_topic   = google_pubsub_topic.ocr_dispatch.id
     retry_policy   = "RETRY_POLICY_RETRY"
   }
+
 }

@@ -49,8 +49,8 @@ resource "google_cloudfunctions2_function" "dispatcher" {
   }
 
   service_config {
-    max_instance_count = 3
-    min_instance_count = 1
+    max_instance_count = 1
+    min_instance_count = 0
     available_memory   = "256M"
     timeout_seconds    = 540 // max
     environment_variables = {
@@ -61,10 +61,5 @@ resource "google_cloudfunctions2_function" "dispatcher" {
     service_account_email          = google_service_account.dispatcher.email
   }
 
-  event_trigger {
-    trigger_region = "us-central1"
-    event_type     = "google.cloud.pubsub.topic.v1.messagePublished"
-    pubsub_topic   = google_pubsub_topic.dispatcher.id
-    retry_policy   = "RETRY_POLICY_RETRY"
-  }
+  
 }

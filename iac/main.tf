@@ -43,6 +43,34 @@ resource "google_pubsub_schema" "ocr" {
   definition = file("../apps/dispatcher/event-schema.json")
 }
 
-resource "google_pubsub_topic" "ocr_dispatch" {
+resource "google_pubsub_topic" "ocr" {
   name = "ocr"
+}
+
+resource "google_pubsub_topic" "ocr_dead_letter" {
+  name = "ocr-dead-letter"
+}
+
+resource "google_pubsub_subscription" "ocr" {
+  name  = "ocr-dispatch"
+  topic = google_pubsub_topic.ocr.name
+
+  dead_letter_policy {
+    dead_letter_topic = google_pubsub_topic.example_dead_letter.id
+    max_delivery_attempts = 10
+  }
+
+  # ack_deadline_seconds = 10
+
+  # labels = {
+  #   foo = "bar"
+  # }
+
+  push_config {
+    push_endpoint = "https://example.com/push"
+
+    attributes = {
+      x-goog-version = "v1"
+    }
+  }
 }
