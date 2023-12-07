@@ -6,10 +6,10 @@ test:
 
 # run-worker
 rw:
-	go run ./worker-cmd
+	go run ./apps/ocr-worker/cmd
 
 run-worker:
-	go run ./worker-cmd
+	go run ./apps/ocr-worker/cmd
 
 debug:
 	go run ./src -debug=true
@@ -19,4 +19,4 @@ build-worker:
 
 
 cover:
-            { "Name": "coverage.out && go tool cover -html=coverage.out
+  coverage.out && go tool cover -html=coverage.out

@@ -1,4 +1,4 @@
-package dispatcer_cmd
+package main
 
 import (
 	"log"
@@ -10,6 +10,7 @@ import (
 func main() {
 	// The server will run on port 8081
 	port := "8081"
+	log.Println("Listening on port:", port)
 	if err := funcframework.Start(port); err != nil {
 		log.Fatalf("funcframework.Start: %v\n", err)
 	}

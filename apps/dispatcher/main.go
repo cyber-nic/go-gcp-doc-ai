@@ -2,10 +2,10 @@ package dispatcher
 
 import (
 	"context"
-	"encoding/json"
 	"log"
 	"net/http"
 	"os"
+	"strconv"
 
 	"cloud.google.com/go/pubsub"
 	"cloud.google.com/go/storage"
@@ -19,14 +19,15 @@ func init() {
 }
 
 type appConfig struct {
-	Debug          bool
-	ProjectID      string
-	SrcBucketName  string
-	RefsBucketName string
-	OcrTopicName   string
-	BatchSize      int
-	MaxFiles       int
-	MaxBatch       int
+	Debug           bool
+	ProjectID       string
+	SrcBucketName   string
+	SrcBucketPrefix string
+	RefsBucketName  string
+	OcrTopicName    string
+	BatchSize       int
+	MaxFiles        int
+	MaxBatch        int
 }
 
 // Function Dispatcher is an HTTP handler
@@ -36,6 +37,9 @@ func Dispatcher(w http.ResponseWriter, r *http.Request) {
 
 	// app config
 	cfg := getConfig()
+	if cfg.Debug {
+		utils.PrintStruct(cfg)
+	}
 
 	// create storage client
 	client, err := storage.NewClient(ctx)
@@ -56,58 +60,123 @@ func Dispatcher(w http.ResponseWriter, r *http.Request) {
 	topic := pubsubClient.Topic(cfg.OcrTopicName)
 	defer topic.Stop()
 
-	var filenames []string
-	it := srcBucket.Objects(ctx, nil)
+	files := []*storage.ObjectAttrs{}
+
+	q := &storage.Query{
+		MatchGlob: cfg.SrcBucketPrefix,
+	}
+
+	// track files and batches counts
+	fileIdx := 0
+	batchIdx := 0
+
+	itr := srcBucket.Objects(ctx, q)
 	for {
-		attrs, err := it.Next()
+		attrs, err := itr.Next()
 		if err != nil {
 			break
 		}
-		// Check if the file is already processed
-		if existsInRefsBucket(ctx, refsBucket, attrs.Name) {
+
+		// Check if file was already processed
+		ok, err := existsInRefsBucket(ctx, refsBucket, toRef(attrs.CRC32C))
+		if err != nil || ok {
+			// todo: if err write to src-err
 			continue
 		}
 
-		filenames = append(filenames, attrs.Name)
-		if len(filenames) >= 100 {
-			// Send batch
-			if err := sendBatch(ctx, topic, filenames); err != nil {
-				log.Printf("Failed to send batch: %v", err)
-				// Handle error
+		// Limit file count
+		if cfg.MaxFiles > 0 && fileIdx > cfg.MaxFiles {
+			log.Println("MAX FILES REACHED")
+			break
+		}
+		fileIdx++
+
+		// Batch files
+		files = append(files, attrs)
+		if len(files) >= cfg.BatchSize {
+			// print batch
+			log.Println("NEW BATCH")
+			for _, a := range files {
+				log.Println(a.Name)
 			}
-			filenames = []string{}
+			// // Send batch
+			// if err := sendBatch(ctx, topic, filenames); err != nil {
+			// 	log.Printf("Failed to send batch: %v", err)
+			// 	// Handle error
+			// }
+
+			// write refs to refs bucket
+			for _, a := range files {
+				if err := writeRef(ctx, refsBucket,  toRef(a.CRC32C), a.Name); err != nil {
+					log.Printf("Failed to write ref: %v", err)
+					// Handle error
+				}
+			}
+
+			files = []*storage.ObjectAttrs{}
 		}
+
+		// Limit batch count
+		if cfg.MaxBatch > 0 && batchIdx > cfg.MaxBatch {
+			log.Println("MAX BATCH REACHED")
+			break
+		}
+		batchIdx++
 	}
 
-	// Send any remaining files in the final batch
-	if len(filenames) > 0 {
-		if err := sendBatch(ctx, topic, filenames); err != nil {
-			log.Printf("Failed to send final batch: %v", err)
-			// Handle error
-		}
-	}
+	// // Send any remaining files in the final batch
+	// if len(filenames) > 0 {
+	// 	if err := sendBatch(ctx, topic, filenames); err != nil {
+	// 		log.Printf("Failed to send final batch: %v", err)
+	// 		// Handle error
+	// 	}
+	// }
 
+	log.Println("done")
 }
 
-func existsInRefsBucket(ctx context.Context, bucket *storage.BucketHandle, filename string) bool {
-	// Implement logic to check if a file exists in the refs bucket
-	// ...
-	return false
-}
+func writeRef(ctx context.Context, bucket *storage.BucketHandle, k string, v string) error {
+	writer := bucket.Object(k).NewWriter(ctx)
+	defer writer.Close()
 
-func sendBatch(ctx context.Context, topic *pubsub.Topic, filenames []string) error {
-	batch := Batch{Filenames: filenames}
-	batchData, err := json.Marshal(batch)
-	if err != nil {
+	if _, err := writer.Write([]byte(v)); err != nil {
 		return err
 	}
-	result := topic.Publish(ctx, &pubsub.Message{
-		Data: batchData,
-	})
-	_, err = result.Get(ctx)
-	return err
+
+	if err := writer.Close(); err != nil {
+		return err
+	}
+	return nil
 }
 
+func toRef(crc32 uint32) string {
+	return strconv.FormatUint(uint64(crc32), 10)
+}
+
+func existsInRefsBucket(ctx context.Context, bucket *storage.BucketHandle, filename string) (bool, error) {
+	_, err := bucket.Object(filename).NewReader(ctx)
+	if err != nil && err == storage.ErrObjectNotExist {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+
+	return true, nil
+}
+
+// func sendBatch(ctx context.Context, topic *pubsub.Topic, filenames []string) error {
+// 	batch := Batch{Filenames: filenames}
+// 	batchData, err := json.Marshal(batch)
+// 	if err != nil {
+// 		return err
+// 	}
+// 	result := topic.Publish(ctx, &pubsub.Message{
+// 		Data: batchData,
+// 	})
+// 	_, err = result.Get(ctx)
+// 	return err
+// }
 
 func getConfig() appConfig {
 	debug := utils.GetBoolEnvVar("DEBUG", false)
@@ -126,6 +195,10 @@ func getConfig() appConfig {
 		log.Fatalf("OCR_TOPIC_NAME required")
 	}
 
+	// prefix is the prefix of the files to be processed. It allows for running
+	// smaller more targeted batches
+	srcBucketPrefix := utils.GetStrEnvVar("SRC_BUCKET_PREFIX", "**/*.jpg")
+
 	// limits
 	batchSize := utils.GetIntEnvVar("BATCH_SIZE", 100)
 	// maxFiles is the total number of images the system will process
@@ -136,13 +209,14 @@ func getConfig() appConfig {
 	maxBatch := utils.GetIntEnvVar("MAX_BATCH", 0)
 
 	return appConfig{
-		Debug:          debug,
-		ProjectID:      projectID,
-		SrcBucketName:  srcBucketName,
-		RefsBucketName: refsBucketName,
-		OcrTopicName:   ocrTopicName,
-		BatchSize:      batchSize,
-		MaxFiles:       maxFiles,
-		MaxBatch:       maxBatch,
+		Debug:           debug,
+		ProjectID:       projectID,
+		SrcBucketName:   srcBucketName,
+		SrcBucketPrefix: srcBucketPrefix,
+		RefsBucketName:  refsBucketName,
+		OcrTopicName:    ocrTopicName,
+		BatchSize:       batchSize,
+		MaxFiles:        maxFiles,
+		MaxBatch:        maxBatch,
 	}
 }
