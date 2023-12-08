@@ -25,9 +25,6 @@ func Dispatcher(w http.ResponseWriter, r *http.Request) {
 
 	// app config
 	cfg := getConfig()
-	// if cfg.Debug {
-	// 	utils.PrintStruct(cfg)
-	// }
 
 	// create storage client
 	storageClient, err := storage.NewClient(ctx)
@@ -78,7 +75,7 @@ func Dispatcher(w http.ResponseWriter, r *http.Request) {
 		}
 
 		// Limit file count
-		if cfg.MaxFiles > 0 && fileIdx > cfg.MaxFiles {
+		if cfg.MaxFiles > 0 && fileIdx >= cfg.MaxFiles {
 			log.Println("MAX FILES REACHED")
 			break
 		}
@@ -87,16 +84,18 @@ func Dispatcher(w http.ResponseWriter, r *http.Request) {
 		// Batch files
 		filenames = append(filenames, attrs.Name)
 		if len(filenames) >= cfg.BatchSize {
-			// Send batch
+			// inc batch count
+			batchIdx++
 
-			err := publishFilenameBatch(ctx, topic, filenames)
+			// Send batch
+			enc, err := publishFilenameBatch(ctx, topic, filenames)
 			if err != nil {
 				log.Printf("Failed to publish pubsub batch: %v", err)
 				// Handle error
 				// is error for batch or single file?
 				continue
 			}
-			log.Println("batch published")
+			log.Println("(batch)", "id:", batchIdx, "files:", len(filenames), "data", enc)
 
 			// write refs to refs bucket
 			if errs := writeRefs(ctx, refsBucket, filenames); errs != nil && len(errs) > 0 {
@@ -107,11 +106,10 @@ func Dispatcher(w http.ResponseWriter, r *http.Request) {
 		}
 
 		// Limit batch count
-		if cfg.MaxBatch > 0 && batchIdx > cfg.MaxBatch {
+		if cfg.MaxBatch > 0 && batchIdx >= cfg.MaxBatch {
 			log.Println("MAX BATCH REACHED")
 			break
 		}
-		batchIdx++
 	}
 
 	// Send any remaining files in a final batch
@@ -123,10 +121,10 @@ func Dispatcher(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if fileIdx == 0 && batchIdx == 0 {
-		log.Println("No files to process")
+		log.Println("(metris) none")
+		return
 	}
-
-	log.Println("done")
+	log.Println("(metrics)", "batches:", batchIdx, "files:", fileIdx, )
 }
 
 func writeRefs(ctx context.Context, bucket *storage.BucketHandle, filenames []string) []error {
@@ -178,10 +176,11 @@ type MessageShema struct {
 	Filenames string `json:"filenames"`
 }
 
-func publishFilenameBatch(ctx context.Context, t *pubsub.Topic, f []string) error {
+func publishFilenameBatch(ctx context.Context, t *pubsub.Topic, f []string) (string, error) {
+	var id string
 	enc, err := utils.EncodeToBase64(f)
 	if err != nil {
-		return err
+		return id, err
 	}
 
 	result := t.Publish(ctx, &pubsub.Message{
@@ -190,12 +189,12 @@ func publishFilenameBatch(ctx context.Context, t *pubsub.Topic, f []string) erro
 
 	// Block until the result is returned and a server-generated
 	// ID is returned for the published message.
-	_, err = result.Get(ctx)
+	id, err = result.Get(ctx)
 	if err != nil {
-		return err
+		return id, err
 	}
 
-	return nil
+	return id, nil
 }
 
 func getMandatoryEnvVar(n string) string {

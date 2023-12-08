@@ -26,9 +26,6 @@ var (
 func main() {
 	// app config
 	cfg := getConfig()
-	// if cfg.Debug {
-	// 	utils.PrintStruct(cfg)
-	// }
 
 	// context and signal handling
 	ctx := context.Background()
