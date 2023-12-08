@@ -1,6 +1,0 @@
-#/bin/bash
-
-tilt down
-docker stop kind-control-plane
-docker stop kind-registry
-

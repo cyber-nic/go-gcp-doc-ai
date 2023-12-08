@@ -1,8 +1,0 @@
-{
-  "type": "record",
-  "name": "Avro",
-  "fields": [
-    { "name": "StringField", "type": "string" },
-    { "name": "IntField", "type": "int" }
-  ]
-}

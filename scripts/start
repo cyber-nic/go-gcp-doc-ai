@@ -1,5 +1,0 @@
-#/bin/bash
-
-docker start kind-registry
-docker start kind-control-plane
-tilt up --stream=true

@@ -37,22 +37,17 @@ resource "google_storage_bucket" "nlp_output" {
 }
 
 // ocr pubsub
-resource "google_pubsub_schema" "ocr" {
-  name       = "events-schema"
-  type       = "AVRO"
-  definition = file("../apps/dispatcher/event-schema.json")
-}
 
 resource "google_pubsub_topic" "ocr" {
   name = "ocr"
 }
 
 resource "google_pubsub_topic" "ocr_dead_letter" {
-  name = "ocr-dead-letter"
+  name = "ocr-dl"
 }
 
 resource "google_pubsub_subscription" "ocr" {
-  name  = "ocr-dispatch"
+  name  = "ocr-sub"
   topic = google_pubsub_topic.ocr.name
 
   dead_letter_policy {

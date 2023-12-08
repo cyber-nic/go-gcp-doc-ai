@@ -5,7 +5,7 @@ import (
 	"log"
 	"net/http"
 	"os"
-	"strconv"
+	"strings"
 
 	"cloud.google.com/go/pubsub"
 	"cloud.google.com/go/storage"
@@ -18,18 +18,6 @@ func init() {
 	functions.HTTP("dispatch", Dispatcher)
 }
 
-type appConfig struct {
-	Debug           bool
-	ProjectID       string
-	SrcBucketName   string
-	SrcBucketPrefix string
-	RefsBucketName  string
-	OcrTopicName    string
-	BatchSize       int
-	MaxFiles        int
-	MaxBatch        int
-}
-
 // Function Dispatcher is an HTTP handler
 func Dispatcher(w http.ResponseWriter, r *http.Request) {
 	// context
@@ -37,30 +25,30 @@ func Dispatcher(w http.ResponseWriter, r *http.Request) {
 
 	// app config
 	cfg := getConfig()
-	if cfg.Debug {
-		utils.PrintStruct(cfg)
-	}
+	// if cfg.Debug {
+	// 	utils.PrintStruct(cfg)
+	// }
 
 	// create storage client
-	client, err := storage.NewClient(ctx)
+	storageClient, err := storage.NewClient(ctx)
 	if err != nil {
 		log.Fatalf("Failed to create storage client: %v", err)
 	}
-	defer client.Close()
+	defer storageClient.Close()
 
 	// create bucket handlers
-	srcBucket := client.Bucket(cfg.SrcBucketName)
-	refsBucket := client.Bucket(cfg.RefsBucketName)
+	srcBucket := storageClient.Bucket(cfg.SrcBucketName)
+	refsBucket := storageClient.Bucket(cfg.RefsBucketName)
 
 	// create pubsub client and topic handler
 	pubsubClient, err := pubsub.NewClient(ctx, cfg.ProjectID)
 	if err != nil {
 		log.Fatalf("Failed to create Pub/Sub client: %v", err)
 	}
-	topic := pubsubClient.Topic(cfg.OcrTopicName)
+	topic := pubsubClient.Topic(cfg.PubsubTopicID)
 	defer topic.Stop()
 
-	files := []*storage.ObjectAttrs{}
+	filenames := []string{}
 
 	q := &storage.Query{
 		MatchGlob: cfg.SrcBucketPrefix,
@@ -77,8 +65,13 @@ func Dispatcher(w http.ResponseWriter, r *http.Request) {
 			break
 		}
 
+		// skip a few empty files
+		if attrs.Size == 0 {
+			continue
+		}
+
 		// Check if file was already processed
-		ok, err := existsInRefsBucket(ctx, refsBucket, toRef(attrs.CRC32C))
+		ok, err := existsInRefsBucket(ctx, refsBucket, getFilename(attrs.Name))
 		if err != nil || ok {
 			// todo: if err write to src-err
 			continue
@@ -92,28 +85,25 @@ func Dispatcher(w http.ResponseWriter, r *http.Request) {
 		fileIdx++
 
 		// Batch files
-		files = append(files, attrs)
-		if len(files) >= cfg.BatchSize {
-			// print batch
-			log.Println("NEW BATCH")
-			for _, a := range files {
-				log.Println(a.Name)
+		filenames = append(filenames, attrs.Name)
+		if len(filenames) >= cfg.BatchSize {
+			// Send batch
+
+			err := publishFilenameBatch(ctx, topic, filenames)
+			if err != nil {
+				log.Printf("Failed to publish pubsub batch: %v", err)
+				// Handle error
+				// is error for batch or single file?
+				continue
 			}
-			// // Send batch
-			// if err := sendBatch(ctx, topic, filenames); err != nil {
-			// 	log.Printf("Failed to send batch: %v", err)
-			// 	// Handle error
-			// }
+			log.Println("batch published")
 
 			// write refs to refs bucket
-			for _, a := range files {
-				if err := writeRef(ctx, refsBucket,  toRef(a.CRC32C), a.Name); err != nil {
-					log.Printf("Failed to write ref: %v", err)
-					// Handle error
-				}
+			if errs := writeRefs(ctx, refsBucket, filenames); errs != nil && len(errs) > 0 {
+				log.Printf("Failed to write refs: %v", err)
 			}
 
-			files = []*storage.ObjectAttrs{}
+			filenames = []string{}
 		}
 
 		// Limit batch count
@@ -124,33 +114,52 @@ func Dispatcher(w http.ResponseWriter, r *http.Request) {
 		batchIdx++
 	}
 
-	// // Send any remaining files in the final batch
-	// if len(filenames) > 0 {
-	// 	if err := sendBatch(ctx, topic, filenames); err != nil {
-	// 		log.Printf("Failed to send final batch: %v", err)
-	// 		// Handle error
-	// 	}
-	// }
+	// Send any remaining files in a final batch
+	if len(filenames) > 0 {
+		// write refs to refs bucket
+		if errs := writeRefs(ctx, refsBucket, filenames); errs != nil && len(errs) > 0 {
+			log.Printf("Failed to write refs: %v", err)
+		}
+	}
+
+	if fileIdx == 0 && batchIdx == 0 {
+		log.Println("No files to process")
+	}
 
 	log.Println("done")
 }
 
-func writeRef(ctx context.Context, bucket *storage.BucketHandle, k string, v string) error {
+func writeRefs(ctx context.Context, bucket *storage.BucketHandle, filenames []string) []error {
+	var errs []error
+	for _, n := range filenames {
+		if _, err := writeRef(ctx, bucket, getFilename(n), n); err != nil {
+			log.Printf("Failed to write ref: %v", err)
+			// Handle individual errors
+			errs = append(errs, err)
+		}
+	}
+	return errs
+}
+
+func writeRef(ctx context.Context, bucket *storage.BucketHandle, k string, v string) (*storage.ObjectAttrs, error) {
 	writer := bucket.Object(k).NewWriter(ctx)
 	defer writer.Close()
 
 	if _, err := writer.Write([]byte(v)); err != nil {
-		return err
+		return nil, err
 	}
 
-	if err := writer.Close(); err != nil {
-		return err
-	}
-	return nil
+	return writer.Attrs(), nil
 }
 
-func toRef(crc32 uint32) string {
-	return strconv.FormatUint(uint64(crc32), 10)
+func getFilename(f string) string {
+	// Split the object name into parts
+	parts := strings.Split(f, "/")
+
+	// Extract the filename
+	filename := parts[len(parts)-1]
+
+	return filename
 }
 
 func existsInRefsBucket(ctx context.Context, bucket *storage.BucketHandle, filename string) (bool, error) {
@@ -165,35 +174,65 @@ func existsInRefsBucket(ctx context.Context, bucket *storage.BucketHandle, filen
 	return true, nil
 }
 
-// func sendBatch(ctx context.Context, topic *pubsub.Topic, filenames []string) error {
-// 	batch := Batch{Filenames: filenames}
-// 	batchData, err := json.Marshal(batch)
-// 	if err != nil {
-// 		return err
-// 	}
-// 	result := topic.Publish(ctx, &pubsub.Message{
-// 		Data: batchData,
-// 	})
-// 	_, err = result.Get(ctx)
-// 	return err
-// }
+type MessageShema struct {
+	Filenames string `json:"filenames"`
+}
+
+func publishFilenameBatch(ctx context.Context, t *pubsub.Topic, f []string) error {
+	enc, err := utils.EncodeToBase64(f)
+	if err != nil {
+		return err
+	}
+
+	result := t.Publish(ctx, &pubsub.Message{
+		Data: []byte(enc),
+	})
+
+	// Block until the result is returned and a server-generated
+	// ID is returned for the published message.
+	_, err = result.Get(ctx)
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func getMandatoryEnvVar(n string) string {
+	v := os.Getenv(n)
+	if v != "" {
+		return v
+	}
+	log.Fatalf("%s required", n)
+	return ""
+}
+
+type appConfig struct {
+	Debug           bool
+	ProjectID       string
+	SrcBucketName   string
+	SrcBucketPrefix string
+	RefsBucketName  string
+	BatchSize       int
+	MaxFiles        int
+	MaxBatch        int
+	PubsubProjectID string
+	PubsubTopicID   string
+}
 
 func getConfig() appConfig {
 	debug := utils.GetBoolEnvVar("DEBUG", false)
 
-	projectID := os.Getenv("GCP_PROJECT_ID")
-	if projectID == "" {
-		log.Fatalf("GCP_PROJECT_ID required")
-	}
-	srcBucketName := os.Getenv("SRC_BUCKET_NAME")
-	refsBucketName := os.Getenv("REFS_BUCKET_NAME")
-	if srcBucketName == "" || refsBucketName == "" {
-		log.Fatalf("SRC_BUCKET_NAME and REFS_BUCKET_NAME required")
-	}
-	ocrTopicName := os.Getenv("OCR_TOPIC_NAME")
-	if ocrTopicName == "" {
-		log.Fatalf("OCR_TOPIC_NAME required")
-	}
+	// gcp
+	projectID := getMandatoryEnvVar("GCP_PROJECT_ID")
+
+	// buckets
+	srcBucketName := getMandatoryEnvVar("SRC_BUCKET_NAME")
+	refsBucketName := getMandatoryEnvVar("REFS_BUCKET_NAME")
+
+	// pubsub
+	pubsubProjectID := getMandatoryEnvVar("PUBSUB_PROJECT_ID")
+	pubsubTopicID := getMandatoryEnvVar("PUBSUB_TOPIC_ID")
 
 	// prefix is the prefix of the files to be processed. It allows for running
 	// smaller more targeted batches
@@ -214,9 +253,10 @@ func getConfig() appConfig {
 		SrcBucketName:   srcBucketName,
 		SrcBucketPrefix: srcBucketPrefix,
 		RefsBucketName:  refsBucketName,
-		OcrTopicName:    ocrTopicName,
 		BatchSize:       batchSize,
 		MaxFiles:        maxFiles,
 		MaxBatch:        maxBatch,
+		PubsubProjectID: pubsubProjectID,
+		PubsubTopicID:   pubsubTopicID,
 	}
 }
