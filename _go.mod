@@ -1,4 +1,4 @@
-module github.com/cyber-nic/go-gcp-docai-ocr
+module github.com/cyber-nic/go-gcp-doc-ai
 
 go 1.20
 

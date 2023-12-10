@@ -4,8 +4,8 @@ import (
 	"log"
 
 	"github.com/GoogleCloudPlatform/functions-framework-go/funcframework"
-	_ "github.com/cyber-nic/go-gcp-docai-ocr/apps/dispatcher"
-	"github.com/cyber-nic/go-gcp-docai-ocr/libs/utils"
+	_ "github.com/cyber-nic/go-gcp-doc-ai/apps/dispatcher"
+	"github.com/cyber-nic/go-gcp-doc-ai/libs/utils"
 )
 
 func main() {

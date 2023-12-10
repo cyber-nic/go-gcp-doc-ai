@@ -4,8 +4,8 @@ import (
 	"log"
 
 	"github.com/GoogleCloudPlatform/functions-framework-go/funcframework"
-	_ "github.com/cyber-nic/go-gcp-docai-ocr/apps/deduper"
-	"github.com/cyber-nic/go-gcp-docai-ocr/libs/utils"
+	_ "github.com/cyber-nic/go-gcp-doc-ai/apps/deduper"
+	"github.com/cyber-nic/go-gcp-doc-ai/apps/deduper/libs/utils"
 )
 
 func main() {

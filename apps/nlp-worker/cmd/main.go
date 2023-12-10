@@ -4,7 +4,7 @@ import (
 	"log"
 
 	"github.com/GoogleCloudPlatform/functions-framework-go/funcframework"
-	_ "github.com/cyber-nic/go-gcp-docai-ocr/apps/ocr-worker"
+	_ "github.com/cyber-nic/go-gcp-doc-ai/apps/ocr-worker"
 )
 
 func main() {

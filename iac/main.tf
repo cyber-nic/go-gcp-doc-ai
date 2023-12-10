@@ -1,18 +1,18 @@
 
 resource "google_firestore_database" "database" {
   project                 = var.project_id
-  name                    = "(default)"
-  location_id             = local.region
+  name                    = var.project_id
+  location_id             = local.firestore_location_id
   type                    = "FIRESTORE_NATIVE"
   delete_protection_state = "DELETE_PROTECTION_ENABLED"
 }
 
 # buckets
-resource "google_storage_bucket" "src" {
-  name          = "${var.project_prefix}-src"
-  location      = local.region
-  force_destroy = true
-}
+# resource "google_storage_bucket" "src" {
+#   name          = "${var.project_prefix}-src"
+#   location      = local.region
+#   force_destroy = true
+# }
 
 resource "google_storage_bucket" "src_refs" {
   name          = "${var.project_prefix}-src-refs"

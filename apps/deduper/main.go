@@ -58,6 +58,7 @@ func Deduper(w http.ResponseWriter, r *http.Request) {
 
 	// input
 	projectID := getMandatoryEnvVar("GCP_PROJECT_ID")
+	fireDatabaseID := getMandatoryEnvVar("FIRESTORE_DATABASE_ID")
 	fireImageCollectionName := getMandatoryEnvVar("FIRESTORE_IMAGE_COLLECTION_NAME")
 	fireFileCollectionName := getMandatoryEnvVar("FIRESTORE_FILE_COLLECTION_NAME")
 	bucketName := getMandatoryEnvVar("BUCKET_NAME")
@@ -69,7 +70,7 @@ func Deduper(w http.ResponseWriter, r *http.Request) {
 	maxFiles := GetIntEnvVar("MAX_FILES", 0)
 
 	// Initialize Firestore client.
-	fire, err := firestore.NewClient(ctx, projectID)
+	fire, err := firestore.NewClientWithDatabase(ctx, projectID, fireDatabaseID)
 	if err != nil {
 		log.Fatalf("failed to create Firestore client: %v", err)
 	}

@@ -13,7 +13,7 @@ import (
 
 	documentai "cloud.google.com/go/documentai/apiv1"
 	"cloud.google.com/go/pubsub"
-	"github.com/cyber-nic/go-gcp-docai-ocr/libs/utils"
+	"github.com/cyber-nic/go-gcp-doc-ai/libs/utils"
 	"google.golang.org/api/option"
 )
 

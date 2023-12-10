@@ -15,6 +15,9 @@ variable "deduper_debug" {
   type = bool
   default = false
 }
+variable "deduper_src_bucket_name" {
+  type = string
+}
 variable "deduper_src_bucket_prefix" {
   type = string
 }

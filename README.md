@@ -1,4 +1,4 @@
-# go-gcp-docai-ocr
+# go-gcp-doc-ai
 
 This project is a quick and effective way to OCR files in a GCP bucket. It attempts to handle failures by tracking already processed files enabling itself to pickup where it leftoff. The project makes reasonable performance for cost tradeoffs such as tracking processed files using a bucket rather than a database.
 

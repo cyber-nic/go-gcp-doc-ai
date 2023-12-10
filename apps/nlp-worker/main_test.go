@@ -62,7 +62,7 @@ func TestHelloPubSub(t *testing.T) {
 // 	"github.com/google/go-cmp/cmp"
 
 // 	"cloud.google.com/go/storage"
-// 	"github.com/cyber-nic/go-gcp-docai-ocr/types"
+// 	"github.com/cyber-nic/go-gcp-doc-ai/types"
 // )
 
 // var n = storage.ObjectAttrs{

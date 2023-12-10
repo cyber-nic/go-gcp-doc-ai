@@ -13,7 +13,7 @@ import (
 	"cloud.google.com/go/pubsub"
 	"cloud.google.com/go/storage"
 	"github.com/GoogleCloudPlatform/functions-framework-go/functions"
-	"github.com/cyber-nic/go-gcp-docai-ocr/libs/utils"
+	"github.com/cyber-nic/go-gcp-doc-ai/libs/utils"
 )
 
 func init() {

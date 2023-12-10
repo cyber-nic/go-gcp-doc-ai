@@ -7,7 +7,7 @@ import (
 
 	"github.com/GoogleCloudPlatform/functions-framework-go/functions"
 	"github.com/cloudevents/sdk-go/v2/event"
-	"github.com/cyber-nic/go-gcp-docai-ocr/libs/types"
+	"github.com/cyber-nic/go-gcp-doc-ai/libs/types"
 )
 
 func init() {

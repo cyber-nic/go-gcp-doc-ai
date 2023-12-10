@@ -8,7 +8,7 @@ import (
 	documentai "cloud.google.com/go/documentai/apiv1"
 	"cloud.google.com/go/documentai/apiv1/documentaipb"
 	"cloud.google.com/go/pubsub"
-	"github.com/cyber-nic/go-gcp-docai-ocr/libs/utils"
+	"github.com/cyber-nic/go-gcp-doc-ai/libs/utils"
 )
 
 // SvcOptions is the representation of the options availble to the OCRWorkerSvc service
