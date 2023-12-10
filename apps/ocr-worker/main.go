@@ -11,8 +11,10 @@ import (
 	"syscall"
 	"time"
 
+	documentai "cloud.google.com/go/documentai/apiv1"
 	"cloud.google.com/go/pubsub"
 	"github.com/cyber-nic/go-gcp-docai-ocr/libs/utils"
+	"google.golang.org/api/option"
 )
 
 const (
@@ -65,10 +67,23 @@ func main() {
 		log.Fatalln("pubsub subscription failed", "project", cfg.PubsubProjectID, "subscription", cfg.PubsubSubscriptionID, "error", err)
 	}
 
+	// doc ai processor
+	endpoint := fmt.Sprintf("%s-documentai.googleapis.com:443", cfg.DocAIProcessorLocation)
+	ai, err := documentai.NewDocumentProcessorClient(ctx, option.WithEndpoint(endpoint))
+	if err != nil {
+		log.Fatalf("error creating Document AI client: %w", err)
+	}
+	defer ai.Close()
+	// doc ai processor name
+	proc := fmt.Sprintf("projects/%s/locations/%s/processors/%s", cfg.ProjectID, cfg.DocAIProcessorLocation, cfg.DocAIProcessorID)
+
 	// main service
 	svc := NewOCRWorkerSvc(ctx, &SvcOptions{
-		Topic:        t,
-		Subscription: s,
+		Topic:                t,
+		Subscription:         s,
+		AIClient:             ai,
+		AIProcessorName:      proc,
+		DestinationBucketURI: fmt.Sprintf("gs://%s", cfg.DstBucketName),
 	})
 	go func() {
 		if err := svc.Start(); err != nil {
@@ -116,16 +131,18 @@ func startWebServer(svc OCRWorkerSvc, exit chan error, p string) {
 }
 
 type appConfig struct {
-	Debug                bool
-	Port                 string
-	ProjectID            string
-	DstBucketName        string
-	ErrBucketName        string
-	RefBucketName        string
-	PubsubProjectID      string
-	PubsubTopicID        string
-	PubsubSubscriptionID string
-	MaxMsgPerMinute      int
+	Debug                  bool
+	Port                   string
+	ProjectID              string
+	DocAIProcessorID       string
+	DocAIProcessorLocation string
+	DstBucketName          string
+	ErrBucketName          string
+	RefBucketName          string
+	PubsubProjectID        string
+	PubsubTopicID          string
+	PubsubSubscriptionID   string
+	DocAIMaxReqPerMinute   int
 }
 
 func getMandatoryEnvVar(n string) string {
@@ -154,20 +171,25 @@ func getConfig() appConfig {
 	pubsubTopicID := getMandatoryEnvVar("PUBSUB_TOPIC_ID")
 	pubsubSubID := getMandatoryEnvVar("PUBSUB_SUBSCRIPTION_ID")
 
-	// maxMsgPerMinute allows for the calibration of the number of messages to be processed per minute
+	// doc ai
+	docAIProcessorID := getMandatoryEnvVar("DOC_AI_PROCESSOR_ID")
+	docAIProcessorLocation := getMandatoryEnvVar("DOC_AI_PROCESSOR_LOCATION")
+	// maxDocAIReqPerMinute allows for the controler of the number of doc ai requests per minute
 	// to avoid exceeding the quota of downstream services such as NLP.
-	maxMsgPerMinute := utils.GetIntEnvVar("MAX_MSG_PER_MIN", 1)
+	docAIMaxReqPerMinute := utils.GetIntEnvVar("DOC_AI_MAX_REQ_PER_MIN", 1)
 
 	return appConfig{
-		Debug:                debug,
-		Port:                 port,
-		ProjectID:            projectID,
-		DstBucketName:        dstBucketName,
-		RefBucketName:        refBucketName,
-		ErrBucketName:        errBucketName,
-		PubsubProjectID:      pubsubProjectID,
-		PubsubTopicID:        pubsubTopicID,
-		PubsubSubscriptionID: pubsubSubID,
-		MaxMsgPerMinute:      maxMsgPerMinute,
+		Debug:                  debug,
+		Port:                   port,
+		ProjectID:              projectID,
+		DstBucketName:          dstBucketName,
+		RefBucketName:          refBucketName,
+		ErrBucketName:          errBucketName,
+		PubsubProjectID:        pubsubProjectID,
+		PubsubTopicID:          pubsubTopicID,
+		PubsubSubscriptionID:   pubsubSubID,
+		DocAIMaxReqPerMinute:   docAIMaxReqPerMinute,
+		DocAIProcessorID:       docAIProcessorID,
+		DocAIProcessorLocation: docAIProcessorLocation,
 	}
 }

@@ -1,71 +1,79 @@
 
+resource "google_firestore_database" "database" {
+  project                 = var.project_id
+  name                    = "(default)"
+  location_id             = local.region
+  type                    = "FIRESTORE_NATIVE"
+  delete_protection_state = "DELETE_PROTECTION_ENABLED"
+}
+
 # buckets
 resource "google_storage_bucket" "src" {
-  name          = "source"
+  name          = "${var.project_prefix}-src"
   location      = local.region
   force_destroy = true
 }
 
 resource "google_storage_bucket" "src_refs" {
-  name          = "src-refs"
+  name          = "${var.project_prefix}-src-refs"
   location      = local.region
   force_destroy = true
 }
 
 resource "google_storage_bucket" "ocr_err" {
-  name          = "ocr-err"
+  name          = "${var.project_prefix}-ocr-err"
   location      = local.region
   force_destroy = true
 }
 
 resource "google_storage_bucket" "ocr_output" {
-  name          = "ocr-output"
+  name          = "${var.project_prefix}-ocr-output"
   location      = local.region
   force_destroy = true
 }
 
 resource "google_storage_bucket" "nlp_err" {
-  name          = "nlp-err"
+  name          = "${var.project_prefix}-nlp-err"
   location      = local.region
   force_destroy = true
 }
 
 resource "google_storage_bucket" "nlp_output" {
-  name          = "nlp-output"
+  name          =  "${var.project_prefix}-nlp-output"
   location      = local.region
   force_destroy = true
 }
 
-// ocr pubsub
+# // ocr pubsub
 
-resource "google_pubsub_topic" "ocr" {
-  name = "ocr"
-}
+# resource "google_pubsub_topic" "ocr" {
+#   name = "ocr"
+# }
 
-resource "google_pubsub_topic" "ocr_dead_letter" {
-  name = "ocr-dl"
-}
+# resource "google_pubsub_topic" "ocr_dead_letter" {
+#   name = "ocr-dl"
+# }
 
-resource "google_pubsub_subscription" "ocr" {
-  name  = "ocr-sub"
-  topic = google_pubsub_topic.ocr.name
+# resource "google_pubsub_subscription" "ocr" {
+#   name  = "ocr-sub"
+#   topic = google_pubsub_topic.ocr.name
 
-  dead_letter_policy {
-    dead_letter_topic = google_pubsub_topic.example_dead_letter.id
-    max_delivery_attempts = 10
-  }
+#   dead_letter_policy {
+#     dead_letter_topic     = google_pubsub_topic.ocr_dead_letter.id
+#     max_delivery_attempts = 10
+#   }
 
-  # ack_deadline_seconds = 10
+#   # ack_deadline_seconds = 10
 
-  # labels = {
-  #   foo = "bar"
-  # }
+#   # labels = {
+#   #   foo = "bar"
+#   # }
 
-  push_config {
-    push_endpoint = "https://example.com/push"
+#   push_config {
+#     push_endpoint = "https://example.com/push"
 
-    attributes = {
-      x-goog-version = "v1"
-    }
-  }
-}
+#     attributes = {
+#       x-goog-version = "v1"
+#     }
+#   }
+# }

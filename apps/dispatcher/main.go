@@ -2,11 +2,14 @@ package dispatcher
 
 import (
 	"context"
+	"fmt"
 	"log"
+	"mime"
 	"net/http"
 	"os"
-	"strings"
+	"path/filepath"
 
+	"cloud.google.com/go/documentai/apiv1/documentaipb"
 	"cloud.google.com/go/pubsub"
 	"cloud.google.com/go/storage"
 	"github.com/GoogleCloudPlatform/functions-framework-go/functions"
@@ -45,17 +48,18 @@ func Dispatcher(w http.ResponseWriter, r *http.Request) {
 	topic := pubsubClient.Topic(cfg.PubsubTopicID)
 	defer topic.Stop()
 
-	filenames := []string{}
+	// filenames := []string{}
+	docs := []documentaipb.GcsDocument{}
 
-	q := &storage.Query{
+	// bucket iterator
+	itr := srcBucket.Objects(ctx, &storage.Query{
 		MatchGlob: cfg.SrcBucketPrefix,
-	}
+	})
 
 	// track files and batches counts
 	fileIdx := 0
 	batchIdx := 0
 
-	itr := srcBucket.Objects(ctx, q)
 	for {
 		attrs, err := itr.Next()
 		if err != nil {
@@ -68,7 +72,7 @@ func Dispatcher(w http.ResponseWriter, r *http.Request) {
 		}
 
 		// Check if file was already processed
-		ok, err := existsInRefsBucket(ctx, refsBucket, getFilename(attrs.Name))
+		ok, err := existsInRefsBucket(ctx, refsBucket, utils.GetFilenameFromPath(attrs.Name))
 		if err != nil || ok {
 			// todo: if err write to src-err
 			continue
@@ -81,28 +85,40 @@ func Dispatcher(w http.ResponseWriter, r *http.Request) {
 		}
 		fileIdx++
 
-		// Batch files
-		filenames = append(filenames, attrs.Name)
-		if len(filenames) >= cfg.BatchSize {
+		// mime type
+		ext := filepath.Ext(attrs.Name)
+		mimeType := mime.TypeByExtension(ext)
+		if mimeType == "" {
+			log.Printf("Failed to get mime type for %s", attrs.Name)
+			continue
+		}
+
+		// add file to batch
+		docs = append(docs, documentaipb.GcsDocument{
+			GcsUri:   fmt.Sprintf("gs://%s/%s", cfg.SrcBucketName, attrs.Name),
+			MimeType: mimeType,
+		})
+
+		if len(docs) >= cfg.BatchSize {
 			// inc batch count
 			batchIdx++
 
 			// Send batch
-			enc, err := publishFilenameBatch(ctx, topic, filenames)
+			enc, err := publishFilenameBatch(ctx, topic, docs)
 			if err != nil {
 				log.Printf("Failed to publish pubsub batch: %v", err)
 				// Handle error
 				// is error for batch or single file?
 				continue
 			}
-			log.Println("(batch)", "id:", batchIdx, "files:", len(filenames), "data", enc)
+			log.Println("(batch)", "id:", batchIdx, "files:", len(docs), "data", enc)
 
 			// write refs to refs bucket
-			if errs := writeRefs(ctx, refsBucket, filenames); errs != nil && len(errs) > 0 {
+			if errs := writeRefs(ctx, refsBucket, docs); errs != nil && len(errs) > 0 {
 				log.Printf("Failed to write refs: %v", err)
 			}
 
-			filenames = []string{}
+			docs = []documentaipb.GcsDocument{}
 		}
 
 		// Limit batch count
@@ -113,9 +129,9 @@ func Dispatcher(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Send any remaining files in a final batch
-	if len(filenames) > 0 {
+	if len(docs) > 0 {
 		// write refs to refs bucket
-		if errs := writeRefs(ctx, refsBucket, filenames); errs != nil && len(errs) > 0 {
+		if errs := writeRefs(ctx, refsBucket, docs); errs != nil && len(errs) > 0 {
 			log.Printf("Failed to write refs: %v", err)
 		}
 	}
@@ -124,13 +140,13 @@ func Dispatcher(w http.ResponseWriter, r *http.Request) {
 		log.Println("(metris) none")
 		return
 	}
-	log.Println("(metrics)", "batches:", batchIdx, "files:", fileIdx, )
+	log.Println("(metrics)", "batches:", batchIdx, "files:", fileIdx)
 }
 
-func writeRefs(ctx context.Context, bucket *storage.BucketHandle, filenames []string) []error {
+func writeRefs(ctx context.Context, bucket *storage.BucketHandle, docs []documentaipb.GcsDocument) []error {
 	var errs []error
-	for _, n := range filenames {
-		if _, err := writeRef(ctx, bucket, getFilename(n), n); err != nil {
+	for _, d := range docs {
+		if _, err := writeRef(ctx, bucket, utils.GetFilenameFromPath(d.GcsUri), d.GcsUri); err != nil {
 			log.Printf("Failed to write ref: %v", err)
 			// Handle individual errors
 			errs = append(errs, err)
@@ -150,16 +166,6 @@ func writeRef(ctx context.Context, bucket *storage.BucketHandle, k string, v str
 	return writer.Attrs(), nil
 }
 
-func getFilename(f string) string {
-	// Split the object name into parts
-	parts := strings.Split(f, "/")
-
-	// Extract the filename
-	filename := parts[len(parts)-1]
-
-	return filename
-}
-
 func existsInRefsBucket(ctx context.Context, bucket *storage.BucketHandle, filename string) (bool, error) {
 	_, err := bucket.Object(filename).NewReader(ctx)
 	if err != nil && err == storage.ErrObjectNotExist {
@@ -176,7 +182,7 @@ type MessageShema struct {
 	Filenames string `json:"filenames"`
 }
 
-func publishFilenameBatch(ctx context.Context, t *pubsub.Topic, f []string) (string, error) {
+func publishFilenameBatch(ctx context.Context, t *pubsub.Topic, f []documentaipb.GcsDocument) (string, error) {
 	var id string
 	enc, err := utils.EncodeToBase64(f)
 	if err != nil {

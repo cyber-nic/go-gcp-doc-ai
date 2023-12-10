@@ -2,16 +2,22 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"log"
 
+	documentai "cloud.google.com/go/documentai/apiv1"
+	"cloud.google.com/go/documentai/apiv1/documentaipb"
 	"cloud.google.com/go/pubsub"
 	"github.com/cyber-nic/go-gcp-docai-ocr/libs/utils"
 )
 
 // SvcOptions is the representation of the options availble to the OCRWorkerSvc service
 type SvcOptions struct {
-	Topic        *pubsub.Topic
-	Subscription *pubsub.Subscription
+	Topic                *pubsub.Topic
+	Subscription         *pubsub.Subscription
+	AIClient             *documentai.DocumentProcessorClient
+	AIProcessorName      string
+	DestinationBucketURI string
 }
 
 type OCRWorkerSvc interface {
@@ -22,19 +28,25 @@ type OCRWorkerSvc interface {
 
 // OCRWorkerSvc is a generic service
 type ocrWorkerSvc struct {
-	ready        bool
-	Context      context.Context
-	Topic        *pubsub.Topic
-	Subscription *pubsub.Subscription
+	ready                bool
+	Context              context.Context
+	Topic                *pubsub.Topic
+	Subscription         *pubsub.Subscription
+	AIClient             *documentai.DocumentProcessorClient
+	AIProcessorName      string
+	DestinationBucketURI string
 }
 
 // NewOCRWorkerSvc creates an instance of the OCRWorkerSvc Service.
 func NewOCRWorkerSvc(ctx context.Context, o *SvcOptions) OCRWorkerSvc {
 	return &ocrWorkerSvc{
-		ready:        false,
-		Context:      ctx,
-		Topic:        o.Topic,
-		Subscription: o.Subscription,
+		ready:                false,
+		Context:              ctx,
+		Topic:                o.Topic,
+		Subscription:         o.Subscription,
+		AIClient:             o.AIClient,
+		AIProcessorName:      o.AIProcessorName,
+		DestinationBucketURI: o.DestinationBucketURI,
 	}
 }
 
@@ -53,9 +65,8 @@ func (svc *ocrWorkerSvc) Start() error {
 	log.Println("service started")
 
 	msgHandler := func(ctx context.Context, m *pubsub.Message) {
-		var filenames []string
-		if err := utils.DecodeFromBase64(&filenames, string(m.Data)); err != nil {
-
+		var docs []documentaipb.GcsDocument
+		if err := utils.DecodeFromBase64(&docs, string(m.Data)); err != nil {
 			// todo: write to err bucket
 			m.Nack()
 			return
@@ -64,7 +75,45 @@ func (svc *ocrWorkerSvc) Start() error {
 		// Acknowledge the message
 		m.Ack()
 
-		utils.PrintStruct(filenames)
+		utils.PrintStruct(docs)
+		documents := make([]*documentaipb.GcsDocument, len(docs))
+		for i, doc := range docs {
+			documents[i] = &doc
+		}
+
+		// https://pkg.go.dev/cloud.google.com/go/documentai/apiv1/documentaipb#ProcessRequest
+		req := &documentaipb.BatchProcessRequest{
+			Name:            svc.AIProcessorName,
+			SkipHumanReview: true,
+			InputDocuments: &documentaipb.BatchDocumentsInputConfig{
+				Source: &documentaipb.BatchDocumentsInputConfig_GcsDocuments{
+					GcsDocuments: &documentaipb.GcsDocuments{
+						Documents: documents,
+					},
+				},
+			},
+			DocumentOutputConfig: &documentaipb.DocumentOutputConfig{
+				Destination: &documentaipb.DocumentOutputConfig_GcsOutputConfig_{
+					GcsOutputConfig: &documentaipb.DocumentOutputConfig_GcsOutputConfig{
+						GcsUri: svc.DestinationBucketURI,
+					},
+				},
+			},
+		}
+
+		// process request
+		op, err := svc.AIClient.BatchProcessDocuments(ctx, req)
+		if err != nil {
+			fmt.Println(fmt.Errorf("op: %w", err))
+		}
+
+		// Handle the results.
+		resp, err := op.Wait(ctx)
+		if err != nil {
+			fmt.Println(fmt.Errorf("wait: %w", err))
+		}
+		// TODO: Use resp.
+		_ = resp.String()
 
 	}
 
