@@ -8,14 +8,15 @@ resource "google_firestore_database" "database" {
 }
 
 # buckets
-# resource "google_storage_bucket" "src" {
-#   name          = "${var.project_prefix}-src"
-#   location      = local.region
-#   force_destroy = true
-# }
 
 resource "google_storage_bucket" "src_checkpoint" {
   name          = "${var.project_prefix}-src-checkpoint"
+  location      = local.region
+  force_destroy = true
+}
+
+resource "google_storage_bucket" "dispatcher_checkpoint" {
+  name          = "${var.project_prefix}-dispatcher-checkpoint"
   location      = local.region
   force_destroy = true
 }

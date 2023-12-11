@@ -5,7 +5,7 @@ import (
 
 	"github.com/GoogleCloudPlatform/functions-framework-go/funcframework"
 	_ "github.com/cyber-nic/go-gcp-doc-ai/apps/dispatcher"
-	"github.com/cyber-nic/go-gcp-doc-ai/libs/utils"
+	"github.com/cyber-nic/go-gcp-doc-ai/apps/dispatcher/libs/utils"
 )
 
 func main() {

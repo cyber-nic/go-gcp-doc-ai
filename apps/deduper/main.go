@@ -24,34 +24,19 @@ import (
 
 	"cloud.google.com/go/firestore"
 	"cloud.google.com/go/storage"
+	"github.com/cyber-nic/go-gcp-doc-ai/apps/deduper/libs/types"
 	"google.golang.org/api/iterator"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 )
 
-// imageDocument represents the computed hash and its associated image paths, along with additional metadata.
-type imageDocument struct {
-	Hash       string   `firestore:"hash"`
-	MimeType   string   `firestore:"mime_type"`
-	ImagePaths []string `firestore:"image_paths"`
-	Width      int      `firestore:"width"`
-	Height     int      `firestore:"height"`
-	Pixels     int      `firestore:"pixels"`
-	Size       int64    `firestore:"size"`
-}
+
 
 type fileDocument struct {
 	Hash string `firestore:"hash"`
 }
 
-// func init() {
-// 	// Register HTTP function with the Functions Framework
-// 	functions.HTTP("Dedup", deduper)
-// }
-
-// Function Dispatcher is an HTTP handler
-// func deduper(w http.ResponseWriter, r *http.Request) {
-	func main() {
+func main() {
 	ctx := context.Background()
 
 	// input
@@ -227,7 +212,7 @@ func processFile(
 	// Creates a Reader to enable reading te object contents.
 	reader, err := obj.NewReader(ctx)
 	if err != nil {
-		log.Printf("Failed to download object: %v", err)
+		log.Printf("Failed to download object: %v (%s)", err, attrs.Name)
 		return err
 	}
 	defer reader.Close()
@@ -236,7 +221,7 @@ func processFile(
 	buf := new(bytes.Buffer)
 	_, err = io.Copy(buf, reader)
 	if err != nil {
-		log.Printf("Failed to read image content: %v", err)
+		log.Printf("Failed to read image content: %v (%s)", err, attrs.Name)
 		return err
 	}
 	// if used directly, the buffer pointer will be at the end of the buffer at the end of the read.
@@ -250,7 +235,7 @@ func processFile(
 	img, _, err := image.Decode(bytes.NewReader(buf.Bytes()))
 	if err != nil {
 		// todo: Printf
-		log.Fatalf("Failed to decode image: %v", err)
+		log.Printf("failed to decode image: %v (%s)", err, attrs.Name)
 		return err
 	}
 
@@ -268,13 +253,13 @@ func processFile(
 	imgRef := images.Doc(hash)
 	imgSnap, err := imgRef.Get(ctx)
 	if err != nil && status.Code(err) != codes.NotFound {
-		log.Printf("failed to get processed document: %v", err)
+		log.Printf("failed to get processed document: %v (%s)", err, attrs.Name)
 		return err
 	}
 
 	// Create or update document with image path.
 	if !imgSnap.Exists() {
-		_, err = imgRef.Set(ctx, &imageDocument{
+		_, err = imgRef.Set(ctx, &types.ImageDocument{
 			Hash:       hash,
 			MimeType:   mimeType,
 			Width:      width,
@@ -284,14 +269,14 @@ func processFile(
 			ImagePaths: []string{attrs.Name},
 		})
 		if err != nil {
-			log.Printf("failed to set fire doc: %v", err)
+			log.Printf("failed to set fire doc: %v (%s)", err, attrs.Name)
 			return err
 		}
 	} else {
-		imageDoc := &imageDocument{}
+		imageDoc := &types.ImageDocument{}
 		err = imgSnap.DataTo(imageDoc)
 		if err != nil {
-			log.Printf("failed to decode fire doc: %v", err)
+			log.Printf("failed to decode fire doc: %v (%s)", err, attrs.Name)
 			return err
 			// break
 		}
@@ -299,7 +284,7 @@ func processFile(
 			imageDoc.ImagePaths = append(imageDoc.ImagePaths, attrs.Name)
 			_, err = imgRef.Set(ctx, imageDoc)
 			if err != nil {
-				log.Printf("failed to set fire doc: %v", err)
+				log.Printf("failed to set fire doc: %v (%s)", err, attrs.Name)
 				return err
 			}
 		}
@@ -309,7 +294,7 @@ func processFile(
 	if _, err = fileRef.Set(ctx, &fileDocument{
 		hash,
 	}); err != nil {
-		log.Printf("failed to create file ref: %v", err)
+		log.Printf("failed to create file ref: %v (%s)", err, attrs.Name)
 		return err
 	}
 
