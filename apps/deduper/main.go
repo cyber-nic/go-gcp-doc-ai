@@ -46,14 +46,13 @@ type fileDocument struct {
 	Hash string `firestore:"hash"`
 }
 
-
 func init() {
 	// Register HTTP function with the Functions Framework
-	functions.HTTP("dedup", Deduper)
+	functions.HTTP("Dedup", deduper)
 }
 
 // Function Dispatcher is an HTTP handler
-func Deduper(w http.ResponseWriter, r *http.Request) {
+func deduper(w http.ResponseWriter, r *http.Request) {
 	ctx := context.Background()
 
 	// input
@@ -62,12 +61,14 @@ func Deduper(w http.ResponseWriter, r *http.Request) {
 	fireImageCollectionName := getMandatoryEnvVar("FIRESTORE_IMAGE_COLLECTION_NAME")
 	fireFileCollectionName := getMandatoryEnvVar("FIRESTORE_FILE_COLLECTION_NAME")
 	bucketName := getMandatoryEnvVar("BUCKET_NAME")
+	checkpointBucketName := getMandatoryEnvVar("BUCKET_CHECKPOINT_NAME")
 	// prefix is the prefix of the files to be processed. It allows for running
 	// smaller more targeted batches
 	bucketPrefix := GetStrEnvVar("BUCKET_PREFIX", "**/*.jpg")
 	// maxFiles is the total number of images the system will process
 	// before terminating. Mainly used for testing/sampling. Zero means no limit.
 	maxFiles := GetIntEnvVar("MAX_FILES", 0)
+	progressCount := GetIntEnvVar("PROGRESS_COUNT", 1000)
 
 	// Initialize Firestore client.
 	fire, err := firestore.NewClientWithDatabase(ctx, projectID, fireDatabaseID)
@@ -89,6 +90,14 @@ func Deduper(w http.ResponseWriter, r *http.Request) {
 	// hasher is used to compute image hash.
 	hasher := sha256.New()
 
+	// checkpoint
+	checkpointObj := store.Bucket(checkpointBucketName).Object("checkpoint")
+	// read value
+	checkpoint := getCheckpoint(ctx, checkpointObj)
+	if checkpoint != "" {
+		log.Printf("(checkpoint) %s\n", checkpoint)
+	}
+
 	// Iterate through all objects in the bucket.
 	bucket := store.Bucket(bucketName)
 	itr := bucket.Objects(ctx, &storage.Query{
@@ -97,30 +106,64 @@ func Deduper(w http.ResponseWriter, r *http.Request) {
 
 	// track files and batches counts
 	fileIdx := 0
+	checkpointReached := false
 
 	for {
 		attrs, err := itr.Next()
 		if err == iterator.Done {
+			log.Println("iterator done")
 			break
 		}
 		if err != nil {
-			log.Printf("failed to iterate bucket objects: %v", err)
+			log.Fatalf("failed to iterate bucket objects: %v", err)
+		}
+
+		// itr control
+		fileIdx++
+		if maxFiles > 0 && fileIdx >= maxFiles {
+			log.Printf("MAX FILES REACHED: %d of %d\n", fileIdx, maxFiles)
+			break
+		}
+
+		// if checkpoint, skip until checkpoint
+		if !checkpointReached && checkpoint != "" && checkpoint != attrs.Name {
+			continue
+		}
+		checkpointReached = true
+
+		// performed every `progressCount` files (ie. ~1,000)
+		if fileIdx % progressCount == 0 {
+			log.Printf("%d files processed\n", fileIdx)
+
+			// update checkpoint every `progressCount`
+			if checkpoint != attrs.Name {
+				log.Printf("(checkpoint) current: %s, next: %s\n", checkpoint, attrs.Name)
+				// open writer
+				w := checkpointObj.NewWriter(ctx)
+				defer w.Close()
+				// update checkpoint
+				if _, err := w.Write([]byte(attrs.Name)); err != nil {
+					log.Printf("failed to write checkpoint (%s): %v\n", attrs.Name, err)
+				}
+				// close writer
+				if err := w.Close(); err != nil {
+					log.Printf("failed to close checkpoint writer (%s): %v\n", attrs.Name, err)
+				}
+			}
+
 		}
 
 		// process
-		processFile(ctx, hasher, images, files, bucket, attrs)
+		err = processFile(ctx, hasher, images, files, bucket, attrs)
+		if err != nil && status.Code(err) == codes.PermissionDenied {
+			log.Fatalf("%v", err)
+		}
 
 		// reset hasher
 		hasher.Reset()
-
-		// sample control
-		fileIdx++
-		if maxFiles > 0 && fileIdx >= maxFiles {
-			log.Println("MAX FILES REACHED")
-			break
-		}
 	}
 
+	log.Println("done")
 	return
 }
 
@@ -144,7 +187,7 @@ func processFile(
 	files *firestore.CollectionRef,
 	bucket *storage.BucketHandle,
 	attrs *storage.ObjectAttrs,
-) {
+) error {
 
 	// get object handle
 	obj := bucket.Object(attrs.Name)
@@ -156,29 +199,35 @@ func processFile(
 	fileRef := files.Doc(filename)
 	_, err := fileRef.Get(ctx)
 	if err == nil {
-		log.Printf("Skip %s", attrs.Name)
-		return
+		// log.Printf("Skip %s", attrs.Name)
+		return nil
 	}
 	if err != nil && status.Code(err) != codes.NotFound {
-		log.Printf("failed to get document: %v", err)
-		return
+		log.Printf("failed to get document (%s): %s %v", filename, status.Code(err), err)
+		return err
+	}
+
+	// skip a few empty files
+	if attrs.Size == 0 {
+		// log.Printf("Skip empty %s", attrs.Name)
+		return nil
 	}
 
 	// Compute image hash.
-	log.Printf("Process %s", attrs.Name)
+	// log.Printf("Process %s", attrs.Name)
 
 	// mime type
 	mimeType, err := getMimeTypeFromExt(attrs.Name)
 	if err != nil {
 		log.Print(err)
-		return
+		return err
 	}
 
 	// Creates a Reader to enable reading te object contents.
 	reader, err := obj.NewReader(ctx)
 	if err != nil {
 		log.Printf("Failed to download object: %v", err)
-		return
+		return err
 	}
 	defer reader.Close()
 
@@ -187,7 +236,7 @@ func processFile(
 	_, err = io.Copy(buf, reader)
 	if err != nil {
 		log.Printf("Failed to read image content: %v", err)
-		return
+		return err
 	}
 	// if used directly, the buffer pointer will be at the end of the buffer at the end of the read.
 	// As a result a practical solution is to create a new bytes reader for each use
@@ -201,7 +250,7 @@ func processFile(
 	if err != nil {
 		// todo: Printf
 		log.Fatalf("Failed to decode image: %v", err)
-		return
+		return err
 	}
 
 	// Get image dimensions and pixel count.
@@ -219,7 +268,7 @@ func processFile(
 	imgSnap, err := imgRef.Get(ctx)
 	if err != nil && status.Code(err) != codes.NotFound {
 		log.Printf("failed to get processed document: %v", err)
-		return
+		return err
 	}
 
 	// Create or update document with image path.
@@ -235,14 +284,14 @@ func processFile(
 		})
 		if err != nil {
 			log.Printf("failed to set fire doc: %v", err)
-			return
+			return err
 		}
 	} else {
 		imageDoc := &imageDocument{}
 		err = imgSnap.DataTo(imageDoc)
 		if err != nil {
 			log.Printf("failed to decode fire doc: %v", err)
-			return
+			return err
 			// break
 		}
 		if !slices.Contains(imageDoc.ImagePaths, attrs.Name) {
@@ -250,20 +299,67 @@ func processFile(
 			_, err = imgRef.Set(ctx, imageDoc)
 			if err != nil {
 				log.Printf("failed to set fire doc: %v", err)
-				return
+				return err
 			}
 		}
 	}
 
 	// create file ref
-	_, err = fileRef.Set(ctx, &fileDocument{
+	if _, err = fileRef.Set(ctx, &fileDocument{
 		hash,
-	})
-	if err != nil {
+	}); err != nil {
 		log.Printf("failed to create file ref: %v", err)
-		return
+		return err
 	}
 
+	return nil
+}
+
+// getCheckpoint reads the checkpoint object from the checkpoint bucket.
+func getCheckpoint(ctx context.Context, o *storage.ObjectHandle) string {
+	// create checkpoint file if it is missing
+	_, err := o.NewReader(ctx)
+	// create file is missing
+	if err != nil && err == storage.ErrObjectNotExist {
+		w := o.NewWriter(ctx)
+		defer w.Close()
+		if _, err := w.Write([]byte("")); err != nil {
+			log.Printf("failed to write checkpoint: %v\n", err)
+		} else {
+			log.Printf("checkpoint file created\n")
+		}
+	// Close the writer.
+	if err := w.Close(); err != nil {
+		log.Fatalf("failed to close object writer: %v", err)
+	}
+	} else if err != nil {
+		// fail is unexpected error
+		log.Print(err)
+		log.Fatalf("failed to create checkpoint reader: %v", err)
+	}
+
+	r, err := o.NewReader(ctx)
+	if err != nil {
+		// fail is unexpected error
+		log.Print(err)
+		log.Fatalf("failed to create checkpoint reader: %v", err)
+	}
+
+	// var w
+	var b []byte
+
+	// Read the entire object into a byte slice.
+	b, err = io.ReadAll(r)
+	if err != nil {
+		log.Fatalf("failed to read object: %v", err)
+	}
+
+	// Close the reader.
+	if err := r.Close(); err != nil {
+		log.Fatalf("failed to close object reader: %v", err)
+	}
+
+	return string(b)
 }
 
 // checkProcessed checks if a given image has already been processed.
@@ -310,7 +406,6 @@ func getMandatoryEnvVar(n string) string {
 	return ""
 }
 
-
 // GetIntEnvVar returns an int from an environment variable
 func GetIntEnvVar(key string, fallback int) int {
 	if value, ok := os.LookupEnv(key); ok {
@@ -340,8 +435,6 @@ func GetBoolEnvVar(key string, fallback bool) bool {
 	}
 	return ret
 }
-
-
 
 func GetFilenameFromPath(f string) string {
 	// Split the object name into parts

@@ -12,8 +12,12 @@ variable "project_prefix" {
 
 # deduper
 variable "deduper_debug" {
-  type = bool
+  type    = bool
   default = false
+}
+variable "deduper_progress_count" {
+  type    = number
+  default = 500
 }
 variable "deduper_src_bucket_name" {
   type = string

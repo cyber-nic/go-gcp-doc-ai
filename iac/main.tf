@@ -14,6 +14,12 @@ resource "google_firestore_database" "database" {
 #   force_destroy = true
 # }
 
+resource "google_storage_bucket" "src_checkpoint" {
+  name          = "${var.project_prefix}-src-checkpoint"
+  location      = local.region
+  force_destroy = true
+}
+
 resource "google_storage_bucket" "src_refs" {
   name          = "${var.project_prefix}-src-refs"
   location      = local.region
@@ -39,7 +45,7 @@ resource "google_storage_bucket" "nlp_err" {
 }
 
 resource "google_storage_bucket" "nlp_output" {
-  name          =  "${var.project_prefix}-nlp-output"
+  name          = "${var.project_prefix}-nlp-output"
   location      = local.region
   force_destroy = true
 }
