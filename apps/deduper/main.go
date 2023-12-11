@@ -1,4 +1,4 @@
-package deduper
+package main
 
 import (
 	"bytes"
@@ -11,7 +11,6 @@ import (
 	"io"
 	"log"
 	"mime"
-	"net/http"
 	"os"
 	"path/filepath"
 	"slices"
@@ -52,7 +51,7 @@ type fileDocument struct {
 
 // Function Dispatcher is an HTTP handler
 // func deduper(w http.ResponseWriter, r *http.Request) {
-	func main(w http.ResponseWriter, r *http.Request) {
+	func main() {
 	ctx := context.Background()
 
 	// input
