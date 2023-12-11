@@ -25,7 +25,6 @@ import (
 
 	"cloud.google.com/go/firestore"
 	"cloud.google.com/go/storage"
-	"github.com/GoogleCloudPlatform/functions-framework-go/functions"
 	"google.golang.org/api/iterator"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -46,13 +45,14 @@ type fileDocument struct {
 	Hash string `firestore:"hash"`
 }
 
-func init() {
-	// Register HTTP function with the Functions Framework
-	functions.HTTP("Dedup", deduper)
-}
+// func init() {
+// 	// Register HTTP function with the Functions Framework
+// 	functions.HTTP("Dedup", deduper)
+// }
 
 // Function Dispatcher is an HTTP handler
-func deduper(w http.ResponseWriter, r *http.Request) {
+// func deduper(w http.ResponseWriter, r *http.Request) {
+	func main(w http.ResponseWriter, r *http.Request) {
 	ctx := context.Background()
 
 	// input
@@ -106,6 +106,7 @@ func deduper(w http.ResponseWriter, r *http.Request) {
 
 	// track files and batches counts
 	fileIdx := 0
+	skippedIdx := 0
 	checkpointReached := false
 
 	for {
@@ -125,32 +126,32 @@ func deduper(w http.ResponseWriter, r *http.Request) {
 			break
 		}
 
+		if !checkpointReached && fileIdx % progressCount == 0 {
+			log.Printf("%d files processed (%d skipped)\n", fileIdx, skippedIdx)
+		}
+
 		// if checkpoint, skip until checkpoint
 		if !checkpointReached && checkpoint != "" && checkpoint != attrs.Name {
+			skippedIdx++
 			continue
 		}
 		checkpointReached = true
+		skippedIdx = 0
 
-		// performed every `progressCount` files (ie. ~1,000)
-		if fileIdx % progressCount == 0 {
-			log.Printf("%d files processed\n", fileIdx)
-
-			// update checkpoint every `progressCount`
-			if checkpoint != attrs.Name {
-				log.Printf("(checkpoint) current: %s, next: %s\n", checkpoint, attrs.Name)
-				// open writer
-				w := checkpointObj.NewWriter(ctx)
-				defer w.Close()
-				// update checkpoint
-				if _, err := w.Write([]byte(attrs.Name)); err != nil {
-					log.Printf("failed to write checkpoint (%s): %v\n", attrs.Name, err)
-				}
-				// close writer
-				if err := w.Close(); err != nil {
-					log.Printf("failed to close checkpoint writer (%s): %v\n", attrs.Name, err)
-				}
+		// update checkpoint every `progressCount` files (ie. ~1,000)
+		if fileIdx % progressCount == 0 && checkpoint != attrs.Name {
+			log.Printf("%d files processed (%d skipped) : (checkpoint) next: %s\n", fileIdx, skippedIdx, attrs.Name)
+			// open writer
+			w := checkpointObj.NewWriter(ctx)
+			defer w.Close()
+			// update checkpoint
+			if _, err := w.Write([]byte(attrs.Name)); err != nil {
+				log.Printf("(checkpoint) failed to write (%s): %v\n", attrs.Name, err)
 			}
-
+			// close writer
+			if err := w.Close(); err != nil {
+				log.Printf("(checkpoint) failed to close writer (%s): %v\n", attrs.Name, err)
+			}
 		}
 
 		// process
@@ -189,19 +190,17 @@ func processFile(
 	attrs *storage.ObjectAttrs,
 ) error {
 
-	// get object handle
-	obj := bucket.Object(attrs.Name)
-
 	// filename
 	filename := GetFilenameFromPath(attrs.Name)
 
-	// Check if file exists in Firestore.
+	// Check if file exists in Firestore
 	fileRef := files.Doc(filename)
 	_, err := fileRef.Get(ctx)
 	if err == nil {
 		// log.Printf("Skip %s", attrs.Name)
 		return nil
 	}
+	// fail if err but continue on NotFound
 	if err != nil && status.Code(err) != codes.NotFound {
 		log.Printf("failed to get document (%s): %s %v", filename, status.Code(err), err)
 		return err
@@ -222,6 +221,9 @@ func processFile(
 		log.Print(err)
 		return err
 	}
+
+	// get object handle
+	obj := bucket.Object(attrs.Name)
 
 	// Creates a Reader to enable reading te object contents.
 	reader, err := obj.NewReader(ctx)
