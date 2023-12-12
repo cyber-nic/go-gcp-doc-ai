@@ -1,4 +1,4 @@
-// go svc tpl
+// package main is the entry point for the ocr-worker application.
 package main
 
 import (
@@ -13,7 +13,7 @@ import (
 
 	documentai "cloud.google.com/go/documentai/apiv1"
 	"cloud.google.com/go/pubsub"
-	"github.com/cyber-nic/go-gcp-doc-ai/libs/utils"
+	"github.com/cyber-nic/go-gcp-doc-ai/apps/ocr-worker/libs/utils"
 	"google.golang.org/api/option"
 )
 
@@ -71,7 +71,7 @@ func main() {
 	endpoint := fmt.Sprintf("%s-documentai.googleapis.com:443", cfg.DocAIProcessorLocation)
 	ai, err := documentai.NewDocumentProcessorClient(ctx, option.WithEndpoint(endpoint))
 	if err != nil {
-		log.Fatalf("error creating Document AI client: %w", err)
+		log.Fatalf("error creating Document AI client: %v", err)
 	}
 	defer ai.Close()
 	// doc ai processor name
@@ -104,7 +104,7 @@ func main() {
 	}()
 
 	// metrics and health
-	// startWebServer(svc, done, cfg.Port)
+	startWebServer(svc, done, cfg.Port)
 	log.Println("exit", <-done)
 }
 

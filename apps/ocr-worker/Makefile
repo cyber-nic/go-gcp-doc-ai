@@ -3,4 +3,4 @@ build:
 
 
 run:
-	gow run .
+	go run .

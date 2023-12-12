@@ -3,7 +3,7 @@ module github.com/cyber-nic/go-gcp-doc-ai/apps/dispatcher
 go 1.21.4
 
 require (
-	cloud.google.com/go/documentai v1.23.6
+	cloud.google.com/go/firestore v1.13.0
 	cloud.google.com/go/pubsub v1.33.0
 	cloud.google.com/go/storage v1.35.1
 	github.com/GoogleCloudPlatform/functions-framework-go v1.8.0

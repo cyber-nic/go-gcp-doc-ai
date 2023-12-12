@@ -8,7 +8,6 @@ import (
 	"net/http"
 	"os"
 
-	"cloud.google.com/go/documentai/apiv1/documentaipb"
 	"cloud.google.com/go/firestore"
 	"cloud.google.com/go/pubsub"
 	"cloud.google.com/go/storage"
@@ -31,50 +30,53 @@ func Dispatcher(w http.ResponseWriter, r *http.Request) {
 	cfg := getConfig()
 
 	// create storage client
-	storageClient, err := storage.NewClient(ctx)
+	s, err := storage.NewClient(ctx)
 	if err != nil {
 		log.Fatalf("failed to create storage client: %v", err)
 	}
-	defer storageClient.Close()
+	defer s.Close()
 
-	// create bucket handlers
-	// srcBucket := storageClient.Bucket(cfg.SrcBucketName)
-	refsBucket := storageClient.Bucket(cfg.RefsBucketName)
+	// ref bucket
+	refsBucket := s.Bucket(cfg.RefsBucketName)
+	if _, err := refsBucket.Attrs(ctx); err != nil {
+		log.Fatalf("failed to get refs bucket: %v", err)
+	}
+
+	// checkpoint
+	checkpointBucket := s.Bucket(cfg.CheckpointBucketName)
+	if _, err := checkpointBucket.Attrs(ctx); err != nil {
+		log.Fatalf("failed to get checkpoint bucket: %v", err)
+	}
+	checkpointObj := checkpointBucket.Object("checkpoint")
+	checkpoint := utils.GetValueFromBucketFile(ctx, checkpointObj)
+	log.Printf("(checkpoint) %s\n", checkpoint)
 
 	// Initialize Firestore client.
-	fireClient, err := firestore.NewClientWithDatabase(ctx, cfg.ProjectID, cfg.FireDatabaseID)
+	db, err := firestore.NewClientWithDatabase(ctx, cfg.ProjectID, cfg.FireDatabaseID)
 	if err != nil {
 		log.Fatalf("failed to create Firestore client: %v", err)
 	}
-	defer fireClient.Close()
-	
+	defer db.Close()
+
 	// create pubsub client and topic handler
-	pubsubClient, err := pubsub.NewClient(ctx, cfg.ProjectID)
+	ps, err := pubsub.NewClient(ctx, cfg.ProjectID)
 	if err != nil {
 		log.Fatalf("failed to create Pub/Sub client: %v", err)
 	}
-	topic := pubsubClient.Topic(cfg.PubsubTopicID)
+	topic := ps.Topic(cfg.PubsubTopicID)
 	defer topic.Stop()
 
-	// docs := []documentaipb.GcsDocument{}
-
-	// bucket iterator
-	// itr := srcBucket.Objects(ctx, &storage.Query{
-	// 	MatchGlob: cfg.SrcBucketPrefix,
-	// })
-
-	// lastProcessed := getLastProcessedID(ctx, storageClient) // Implement this
-	// query := fireClient.Collection(cfg.FireCollectionName).OrderBy("ID", 1).StartAfter(lastProcessed).Limit(batchSize)
-
-	query := fireClient.Collection(cfg.FireCollectionName).OrderBy("ID", 1).Limit(cfg.BatchSize)
+	// build query
+	query := db.Collection(cfg.FireCollectionName).OrderBy("hash", firestore.Asc).StartAfter(checkpoint).Limit(cfg.BatchSize)
 
 	// track files and batches counts
 	fileIdx := 0
 	batchIdx := 0
 
-	// init docs
-	docs := []documentaipb.GcsDocument{}
+	// init doc batch
+	docs := []string{}
 
+	// Iterate through all objects in the firestore collection
 	for {
 		snaps, err := query.Documents(ctx).GetAll()
 		if err != nil {
@@ -84,6 +86,9 @@ func Dispatcher(w http.ResponseWriter, r *http.Request) {
 			break // No more documents
 		}
 
+		newCheckpoint := ""
+
+		// process batch
 		for _, snap := range snaps {
 			// Limit file count
 			if cfg.MaxFiles > 0 && fileIdx >= cfg.MaxFiles {
@@ -105,48 +110,50 @@ func Dispatcher(w http.ResponseWriter, r *http.Request) {
 				log.Fatal(err)
 			}
 
-			var imgdoc types.ImageDocument
-
 			// Unmarshal the JSON data into the struct
+			var imgdoc types.ImageDocument
 			err = json.Unmarshal(jsonBytes, &imgdoc)
 			if err != nil {
 				log.Fatal(err)
 			}
 
-			// mime type
-			mimeType := imgdoc.MimeType
-			if mimeType == "" {
-				mimeType = "image/jpeg"
-			}
-
 			// add file to batch
-			docs = append(docs, documentaipb.GcsDocument{
-				GcsUri:   fmt.Sprintf("gs://%s/%s", cfg.SrcBucketName, imgdoc.ImagePaths[0]),
-				MimeType: mimeType,
-			})
+			docs = append(docs, fmt.Sprintf("gs://%s/%s", cfg.SrcBucketName, imgdoc.ImagePaths[0]))
+			newCheckpoint = imgdoc.ImagePaths[0]
 		}
 
-		if len(docs) >= cfg.BatchSize {
-			// inc batch count
-			batchIdx++
-
-			// Send batch
-			enc, err := publishFilenameBatch(ctx, topic, docs)
-			if err != nil {
-				log.Printf("Failed to publish pubsub batch: %v", err)
-				// Handle error
-				// is error for batch or single file?
-				continue
-			}
-			log.Println("(batch)", "id:", batchIdx, "files:", len(docs), "data", enc)
-
-			// write refs to refs bucket
-			if errs := writeRefs(ctx, refsBucket, docs); len(errs) > 0 {
-				log.Printf("Failed to write refs: %v", err)
-			}
-
-			docs = []documentaipb.GcsDocument{}
+		// in the odd event all docs returned from firestore were already processed
+		if len(docs) == 0 {
+			continue
 		}
+
+		// Send batch
+		enc, err := publishFilenameBatch(ctx, topic, docs)
+		if err != nil {
+			log.Printf("failed to publish pubsub batch: %v", err)
+			// Handle error
+			// is error for batch or single file?
+			continue
+		}
+		log.Println("(batch)", "id:", batchIdx, "files:", len(docs), "data", enc)
+
+		// write refs to refs bucket
+		if errs := writeRefs(ctx, refsBucket, docs); len(errs) > 0 {
+			log.Printf("failed to write refs: %v", err)
+		}
+
+		// update checkpoint
+		if checkpoint != newCheckpoint {
+			log.Printf("(checkpoint) %d next: %s\n", fileIdx, newCheckpoint)
+			utils.SetBucketFileValue(ctx, checkpointObj, newCheckpoint)
+			checkpoint = newCheckpoint
+		}
+
+		// inc batch count
+		batchIdx++
+
+		// reset docs
+		docs = []string{}
 
 		// Limit batch count
 		if cfg.MaxBatch > 0 && batchIdx >= cfg.MaxBatch {
@@ -158,23 +165,23 @@ func Dispatcher(w http.ResponseWriter, r *http.Request) {
 	// Send any remaining files in a final batch
 	if len(docs) > 0 {
 		// write refs to refs bucket
-		if errs := writeRefs(ctx, refsBucket, docs);  len(errs) > 0 {
-			log.Printf("Failed to write refs: %v", err)
+		if errs := writeRefs(ctx, refsBucket, docs); len(errs) > 0 {
+			log.Printf("failed to write refs: %v", err)
 		}
 	}
 
 	if fileIdx == 0 && batchIdx == 0 {
-		log.Println("(metris) none")
+		log.Println("(metrics) none")
 		return
 	}
 	log.Println("(metrics)", "batches:", batchIdx, "files:", fileIdx)
 }
 
-func writeRefs(ctx context.Context, bucket *storage.BucketHandle, docs []documentaipb.GcsDocument) []error {
+func writeRefs(ctx context.Context, bucket *storage.BucketHandle, docs []string) []error {
 	var errs []error
 	for _, d := range docs {
-		if _, err := writeRef(ctx, bucket, utils.GetFilenameFromPath(d.GcsUri), d.GcsUri); err != nil {
-			log.Printf("Failed to write ref: %v", err)
+		if _, err := writeRef(ctx, bucket, utils.GetFilenameFromPath(d), d); err != nil {
+			log.Printf("failed to write ref: %v", err)
 			// Handle individual errors
 			errs = append(errs, err)
 		}
@@ -199,7 +206,7 @@ func existsInRefsBucket(ctx context.Context, bucket *storage.BucketHandle, filen
 		return false, nil
 	}
 	if err != nil {
-		return false, err
+	 	log.Fatalf("failed to check refs bucket: %v", err)
 	}
 
 	return true, nil
@@ -209,7 +216,7 @@ type MessageShema struct {
 	Filenames string `json:"filenames"`
 }
 
-func publishFilenameBatch(ctx context.Context, t *pubsub.Topic, f []documentaipb.GcsDocument) (string, error) {
+func publishFilenameBatch(ctx context.Context, t *pubsub.Topic, f []string) (string, error) {
 	var id string
 	enc, err := utils.EncodeToBase64(f)
 	if err != nil {
@@ -240,17 +247,18 @@ func getMandatoryEnvVar(n string) string {
 }
 
 type appConfig struct {
-	Debug           bool
-	ProjectID       string
-	FireDatabaseID  string
+	Debug              bool
+	ProjectID          string
+	FireDatabaseID     string
 	FireCollectionName string
-	SrcBucketName string
-	RefsBucketName  string
-	BatchSize       int
-	MaxFiles        int
-	MaxBatch        int
-	PubsubProjectID string
-	PubsubTopicID   string
+	SrcBucketName      string
+	RefsBucketName     string
+	CheckpointBucketName string
+	BatchSize          int
+	MaxFiles           int
+	MaxBatch           int
+	PubsubProjectID    string
+	PubsubTopicID      string
 }
 
 func getConfig() appConfig {
@@ -262,6 +270,7 @@ func getConfig() appConfig {
 	// bucket
 	srcBucketName := getMandatoryEnvVar("SRC_BUCKET_NAME")
 	refsBucketName := getMandatoryEnvVar("REFS_BUCKET_NAME")
+	checkpointBucketName := getMandatoryEnvVar("CHECKPOINT_BUCKET_NAME")
 
 	// firestore
 	fireDatabaseID := getMandatoryEnvVar("FIRESTORE_DATABASE_ID")
@@ -281,16 +290,17 @@ func getConfig() appConfig {
 	maxBatch := utils.GetIntEnvVar("MAX_BATCH", 0)
 
 	return appConfig{
-		Debug:           debug,
-		ProjectID:       projectID,
-		FireDatabaseID: fireDatabaseID,
+		Debug:              debug,
+		ProjectID:          projectID,
+		FireDatabaseID:     fireDatabaseID,
 		FireCollectionName: fireCollectionName,
-		SrcBucketName:   srcBucketName,
-		RefsBucketName:  refsBucketName,
-		BatchSize:       batchSize,
-		MaxFiles:        maxFiles,
-		MaxBatch:        maxBatch,
-		PubsubProjectID: pubsubProjectID,
-		PubsubTopicID:   pubsubTopicID,
+		SrcBucketName:      srcBucketName,
+		RefsBucketName:     refsBucketName,
+		CheckpointBucketName: checkpointBucketName,
+		BatchSize:          batchSize,
+		MaxFiles:           maxFiles,
+		MaxBatch:           maxBatch,
+		PubsubProjectID:    pubsubProjectID,
+		PubsubTopicID:      pubsubTopicID,
 	}
 }

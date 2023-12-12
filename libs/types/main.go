@@ -27,11 +27,11 @@ type CloudEventMessage struct {
 
 // ImageDocument represents the computed hash and its associated image paths, along with additional metadata.
 type ImageDocument struct {
-	Hash       string   `firestore:"hash"`
-	MimeType   string   `firestore:"mime_type"`
-	ImagePaths []string `firestore:"image_paths"`
+	Hash       string   `firestore:"hash" `
+	MimeType   string   `firestore:"mime_type"   json:"mime_type"`
+	ImagePaths []string `firestore:"image_paths" json:"image_paths"`
 	Width      int      `firestore:"width"`
 	Height     int      `firestore:"height"`
 	Pixels     int      `firestore:"pixels"`
-	Size       int64    `firestore:"size"`
+	Size       int64    `firestore:"size" `
 }

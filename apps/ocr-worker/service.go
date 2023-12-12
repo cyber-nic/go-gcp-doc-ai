@@ -8,7 +8,7 @@ import (
 	documentai "cloud.google.com/go/documentai/apiv1"
 	"cloud.google.com/go/documentai/apiv1/documentaipb"
 	"cloud.google.com/go/pubsub"
-	"github.com/cyber-nic/go-gcp-doc-ai/libs/utils"
+	"github.com/cyber-nic/go-gcp-doc-ai/apps/ocr-worker/libs/utils"
 )
 
 // SvcOptions is the representation of the options availble to the OCRWorkerSvc service
@@ -65,8 +65,8 @@ func (svc *ocrWorkerSvc) Start() error {
 	log.Println("service started")
 
 	msgHandler := func(ctx context.Context, m *pubsub.Message) {
-		var docs []documentaipb.GcsDocument
-		if err := utils.DecodeFromBase64(&docs, string(m.Data)); err != nil {
+		var filenames []string
+		if err := utils.DecodeFromBase64(&filenames, string(m.Data)); err != nil {
 			// todo: write to err bucket
 			m.Nack()
 			return
@@ -75,52 +75,21 @@ func (svc *ocrWorkerSvc) Start() error {
 		// Acknowledge the message
 		m.Ack()
 
-		utils.PrintStruct(docs)
-		documents := make([]*documentaipb.GcsDocument, len(docs))
-		for i, doc := range docs {
-			documents[i] = &doc
-		}
+		documents := formatDocs(filenames)
+		req := formatDocAIReq(svc.AIProcessorName, svc.DestinationBucketURI, documents)
 
-		// https://pkg.go.dev/cloud.google.com/go/documentai/apiv1/documentaipb#ProcessRequest
-		req := &documentaipb.BatchProcessRequest{
-			Name:            svc.AIProcessorName,
-			SkipHumanReview: true,
-			InputDocuments: &documentaipb.BatchDocumentsInputConfig{
-				Source: &documentaipb.BatchDocumentsInputConfig_GcsDocuments{
-					GcsDocuments: &documentaipb.GcsDocuments{
-						Documents: documents,
-					},
-				},
-			},
-			DocumentOutputConfig: &documentaipb.DocumentOutputConfig{
-				Destination: &documentaipb.DocumentOutputConfig_GcsOutputConfig_{
-					GcsOutputConfig: &documentaipb.DocumentOutputConfig_GcsOutputConfig{
-						GcsUri: svc.DestinationBucketURI,
-					},
-				},
-			},
-		}
-
-		// process request
-		op, err := svc.AIClient.BatchProcessDocuments(ctx, req)
+		_, err := submitDocAIBatch(ctx, svc.AIClient, req)
 		if err != nil {
-			fmt.Println(fmt.Errorf("op: %w", err))
+			log.Println(err)
 		}
-
-		// Handle the results.
-		resp, err := op.Wait(ctx)
-		if err != nil {
-			fmt.Println(fmt.Errorf("wait: %w", err))
-		}
-		// TODO: Use resp.
-		_ = resp.String()
-
+	
+		log.Println("done")
 	}
 
 	// Main service loop.
 	for svc.ready {
 		if err := svc.Subscription.Receive(svc.Context, msgHandler); err != nil {
-			log.Printf("msg", "failed to receive message", "error", err)
+			log.Print("msg", "failed to receive message", "error", err)
 		}
 
 	}
@@ -134,4 +103,61 @@ func (svc *ocrWorkerSvc) Start() error {
 func (svc *ocrWorkerSvc) Stop() {
 	log.Println("stopping service")
 	svc.ready = false
+}
+
+func formatDocs(filenames []string) []*documentaipb.GcsDocument {
+	documents := make([]*documentaipb.GcsDocument, len(filenames))
+	for i, f := range filenames {
+		mime := ""
+		mime, err := utils.GetMimeTypeFromExt(f)
+		if err != nil {
+			mime = "image/jpeg"
+		}
+		documents[i] = &documentaipb.GcsDocument{
+			GcsUri: f,
+			MimeType: mime,
+		}
+	}
+	return documents
+}
+
+func submitDocAIBatch(ctx context.Context, client *documentai.DocumentProcessorClient, req *documentaipb.BatchProcessRequest) (string, error) {
+		// process request
+		op, err := client.BatchProcessDocuments(ctx, req)
+		if err != nil {
+			return "", fmt.Errorf("op: %w", err)
+		}
+		log.Println(op.Metadata())
+
+
+		// Handle the results.
+		resp, err := op.Wait(ctx)
+		if err != nil {
+			return "", fmt.Errorf("wait: %w", err)
+		}
+		// TODO: Use resp.
+		return resp.String(), nil
+
+	}
+
+func formatDocAIReq(processorName string, target string, documents []*documentaipb.GcsDocument) *documentaipb.BatchProcessRequest {
+	 // https://pkg.go.dev/cloud.google.com/go/documentai/apiv1/documentaipb#ProcessRequest
+	 return &documentaipb.BatchProcessRequest{
+		Name:            processorName,
+		SkipHumanReview: true,
+		InputDocuments: &documentaipb.BatchDocumentsInputConfig{
+			Source: &documentaipb.BatchDocumentsInputConfig_GcsDocuments{
+				GcsDocuments: &documentaipb.GcsDocuments{
+					Documents: documents,
+				},
+			},
+		},
+		DocumentOutputConfig: &documentaipb.DocumentOutputConfig{
+			Destination: &documentaipb.DocumentOutputConfig_GcsOutputConfig_{
+				GcsOutputConfig: &documentaipb.DocumentOutputConfig_GcsOutputConfig{
+					GcsUri: target,
+				},
+			},
+		},
+	}
 }

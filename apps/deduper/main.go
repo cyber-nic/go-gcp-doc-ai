@@ -1,3 +1,4 @@
+// this application is used to identify duplicate images in a bucket by creating a firestore document for each unique image
 package main
 
 import (
@@ -5,17 +6,12 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
-	"fmt"
 	"hash"
 	"image"
 	"io"
 	"log"
-	"mime"
 	"os"
-	"path/filepath"
 	"slices"
-	"strconv"
-	"strings"
 
 	// Import image format packages
 
@@ -25,12 +21,11 @@ import (
 	"cloud.google.com/go/firestore"
 	"cloud.google.com/go/storage"
 	"github.com/cyber-nic/go-gcp-doc-ai/apps/deduper/libs/types"
+	"github.com/cyber-nic/go-gcp-doc-ai/apps/deduper/libs/utils"
 	"google.golang.org/api/iterator"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 )
-
-
 
 type fileDocument struct {
 	Hash string `firestore:"hash"`
@@ -48,11 +43,11 @@ func main() {
 	checkpointBucketName := getMandatoryEnvVar("BUCKET_CHECKPOINT_NAME")
 	// prefix is the prefix of the files to be processed. It allows for running
 	// smaller more targeted batches
-	bucketPrefix := GetStrEnvVar("BUCKET_PREFIX", "**/*.jpg")
+	bucketPrefix := utils.GetStrEnvVar("BUCKET_PREFIX", "**/*.jpg")
 	// maxFiles is the total number of images the system will process
 	// before terminating. Mainly used for testing/sampling. Zero means no limit.
-	maxFiles := GetIntEnvVar("MAX_FILES", 0)
-	progressCount := GetIntEnvVar("PROGRESS_COUNT", 1000)
+	maxFiles := utils.GetIntEnvVar("MAX_FILES", 0)
+	progressCount := utils.GetIntEnvVar("PROGRESS_COUNT", 1000)
 
 	// Initialize Firestore client.
 	fire, err := firestore.NewClientWithDatabase(ctx, projectID, fireDatabaseID)
@@ -75,12 +70,11 @@ func main() {
 	hasher := sha256.New()
 
 	// checkpoint
-	checkpointObj := store.Bucket(checkpointBucketName).Object("checkpoint")
+	checkpointFilename := "checkpoint"
+	checkpointObj := store.Bucket(checkpointBucketName).Object(checkpointFilename)
 	// read value
-	checkpoint := getCheckpoint(ctx, checkpointObj)
-	if checkpoint != "" {
-		log.Printf("(checkpoint) %s\n", checkpoint)
-	}
+	checkpoint := utils.GetValueFromBucketFile(ctx, checkpointObj)
+	log.Printf("(checkpoint) %s\n", checkpoint)
 
 	// Iterate through all objects in the bucket.
 	bucket := store.Bucket(bucketName)
@@ -110,7 +104,7 @@ func main() {
 			break
 		}
 
-		if !checkpointReached && fileIdx % progressCount == 0 {
+		if !checkpointReached && fileIdx%progressCount == 0 {
 			log.Printf("%d files processed (%d skipped)\n", fileIdx, skippedIdx)
 		}
 
@@ -123,19 +117,9 @@ func main() {
 		skippedIdx = 0
 
 		// update checkpoint every `progressCount` files (ie. ~1,000)
-		if fileIdx % progressCount == 0 && checkpoint != attrs.Name {
+		if fileIdx%progressCount == 0 && checkpoint != attrs.Name {
 			log.Printf("%d files processed (%d skipped) : (checkpoint) next: %s\n", fileIdx, skippedIdx, attrs.Name)
-			// open writer
-			w := checkpointObj.NewWriter(ctx)
-			defer w.Close()
-			// update checkpoint
-			if _, err := w.Write([]byte(attrs.Name)); err != nil {
-				log.Printf("(checkpoint) failed to write (%s): %v\n", attrs.Name, err)
-			}
-			// close writer
-			if err := w.Close(); err != nil {
-				log.Printf("(checkpoint) failed to close writer (%s): %v\n", attrs.Name, err)
-			}
+			utils.SetBucketFileValue(ctx, checkpointObj, attrs.Name)
 		}
 
 		// process
@@ -149,21 +133,8 @@ func main() {
 	}
 
 	log.Println("done")
-	return
 }
 
-func getMimeTypeFromExt(name string) (string, error) {
-	var m string
-	// mime type
-	ext := filepath.Ext(name)
-	mimeType := mime.TypeByExtension(ext)
-	if mimeType == "" {
-		return m, fmt.Errorf("Failed to get mime type for %s", name)
-	}
-
-	return m, nil
-
-}
 
 func processFile(
 	ctx context.Context,
@@ -175,7 +146,7 @@ func processFile(
 ) error {
 
 	// filename
-	filename := GetFilenameFromPath(attrs.Name)
+	filename := utils.GetFilenameFromPath(attrs.Name)
 
 	// Check if file exists in Firestore
 	fileRef := files.Doc(filename)
@@ -200,7 +171,7 @@ func processFile(
 	// log.Printf("Process %s", attrs.Name)
 
 	// mime type
-	mimeType, err := getMimeTypeFromExt(attrs.Name)
+	mimeType, err := utils.GetMimeTypeFromExt(attrs.Name)
 	if err != nil {
 		log.Print(err)
 		return err
@@ -301,78 +272,6 @@ func processFile(
 	return nil
 }
 
-// getCheckpoint reads the checkpoint object from the checkpoint bucket.
-func getCheckpoint(ctx context.Context, o *storage.ObjectHandle) string {
-	// create checkpoint file if it is missing
-	_, err := o.NewReader(ctx)
-	// create file is missing
-	if err != nil && err == storage.ErrObjectNotExist {
-		w := o.NewWriter(ctx)
-		defer w.Close()
-		if _, err := w.Write([]byte("")); err != nil {
-			log.Printf("failed to write checkpoint: %v\n", err)
-		} else {
-			log.Printf("checkpoint file created\n")
-		}
-	// Close the writer.
-	if err := w.Close(); err != nil {
-		log.Fatalf("failed to close object writer: %v", err)
-	}
-	} else if err != nil {
-		// fail is unexpected error
-		log.Print(err)
-		log.Fatalf("failed to create checkpoint reader: %v", err)
-	}
-
-	r, err := o.NewReader(ctx)
-	if err != nil {
-		// fail is unexpected error
-		log.Print(err)
-		log.Fatalf("failed to create checkpoint reader: %v", err)
-	}
-
-	// var w
-	var b []byte
-
-	// Read the entire object into a byte slice.
-	b, err = io.ReadAll(r)
-	if err != nil {
-		log.Fatalf("failed to read object: %v", err)
-	}
-
-	// Close the reader.
-	if err := r.Close(); err != nil {
-		log.Fatalf("failed to close object reader: %v", err)
-	}
-
-	return string(b)
-}
-
-// checkProcessed checks if a given image has already been processed.
-func checkProcessed(client *firestore.Client, imageName string) (bool, error) {
-	// Create the document reference for the processed image flag.
-	docRef := client.Collection("processed_images").Doc(imageName)
-
-	// Get the document snapshot.
-	docSnap, err := docRef.Get(context.Background())
-	if err != nil {
-		if status.Code(err) == codes.NotFound {
-			// Image not found, considered not processed.
-			return false, nil
-		}
-		return false, fmt.Errorf("failed to get processed document: %w", err)
-	}
-
-	// Check the processed flag value.
-	var processed bool
-	err = docSnap.DataTo(&processed)
-	if err != nil {
-		return false, fmt.Errorf("failed to decode processed flag: %w", err)
-	}
-
-	return processed, nil
-}
-
 func computeHash(hasher hash.Hash, r *bytes.Reader) string {
 	_, err := io.Copy(hasher, r)
 	if err != nil {
@@ -392,42 +291,3 @@ func getMandatoryEnvVar(n string) string {
 	return ""
 }
 
-// GetIntEnvVar returns an int from an environment variable
-func GetIntEnvVar(key string, fallback int) int {
-	if value, ok := os.LookupEnv(key); ok {
-		i, err := strconv.Atoi(value)
-		if err != nil {
-			log.Fatal("Invalid value for environment variable: " + key)
-		}
-		return i
-	}
-	return fallback
-}
-
-// GetStrEnvVar returns a string from an environment variable
-func GetStrEnvVar(key, fallback string) string {
-	if value, ok := os.LookupEnv(key); ok {
-		return value
-	}
-	return fallback
-}
-
-// GetBoolEnvVar returns a bool from an environment variable
-func GetBoolEnvVar(key string, fallback bool) bool {
-	val := GetStrEnvVar(key, strconv.FormatBool(fallback))
-	ret, err := strconv.ParseBool(val)
-	if err != nil {
-		return fallback
-	}
-	return ret
-}
-
-func GetFilenameFromPath(f string) string {
-	// Split the object name into parts
-	parts := strings.Split(f, "/")
-
-	// Extract the filename
-	filename := parts[len(parts)-1]
-
-	return filename
-}
