@@ -1,3 +1,4 @@
+// Package types contains the types used by more then one application in this repo.
 package types
 
 import "cloud.google.com/go/storage"
@@ -15,11 +16,13 @@ import "cloud.google.com/go/storage"
 //   }
 // }
 
+// CloudEvent represents the CloudEvent message sent by EventArc.
 type CloudEvent struct {
 	Subscription string            `json:"subscription"`
 	Message      CloudEventMessage `json:"message"`
 }
 
+// CloudEventMessage represents the CloudEvent message sent by EventArc.
 type CloudEventMessage struct {
 	Attributes map[string]string     `json:"attributes"`
 	Data       []storage.ObjectAttrs `json:"data"`

@@ -135,7 +135,6 @@ func main() {
 	log.Println("done")
 }
 
-
 func processFile(
 	ctx context.Context,
 	hasher hash.Hash,
@@ -290,4 +289,3 @@ func getMandatoryEnvVar(n string) string {
 	log.Fatalf("%s required", n)
 	return ""
 }
-

@@ -42,17 +42,18 @@ func GetMimeTypeFromExt(name string) (string, error) {
 	return m, nil
 }
 
+// SetBucketFileValue writes a value to an object handle. It will create the object if it does not exist.
 func SetBucketFileValue(ctx context.Context, o *storage.ObjectHandle, v string) error {
 	// open writer
 	w := o.NewWriter(ctx)
 	defer w.Close()
 	// update checkpoint
 	if _, err := w.Write([]byte(v)); err != nil {
-		return fmt.Errorf("(%s) failed to write: %v\n", o.ObjectName(), err)
+		return fmt.Errorf("(%s) failed to write: %v", o.ObjectName(), err)
 	}
 	// close writer
 	if err := w.Close(); err != nil {
-		return fmt.Errorf("(%s) failed to close writer: %v\n", o.ObjectName(), err)
+		return fmt.Errorf("(%s) failed to close writer: %v", o.ObjectName(), err)
 	}
 	return nil
 }

@@ -20,13 +20,14 @@ type SvcOptions struct {
 	DestinationBucketURI string
 }
 
+// OCRWorkerSvc is the interface for the ocrWorkerSvc service.
 type OCRWorkerSvc interface {
 	IsReady() bool
 	Start() error
 	Stop()
 }
 
-// OCRWorkerSvc is a generic service
+// ocrWorkerSvc is a service that will submit a batch of documents to the Document AI API.
 type ocrWorkerSvc struct {
 	ready                bool
 	Context              context.Context
@@ -82,7 +83,7 @@ func (svc *ocrWorkerSvc) Start() error {
 		if err != nil {
 			log.Println(err)
 		}
-	
+
 		log.Println("done")
 	}
 
@@ -114,7 +115,7 @@ func formatDocs(filenames []string) []*documentaipb.GcsDocument {
 			mime = "image/jpeg"
 		}
 		documents[i] = &documentaipb.GcsDocument{
-			GcsUri: f,
+			GcsUri:   f,
 			MimeType: mime,
 		}
 	}
@@ -122,27 +123,26 @@ func formatDocs(filenames []string) []*documentaipb.GcsDocument {
 }
 
 func submitDocAIBatch(ctx context.Context, client *documentai.DocumentProcessorClient, req *documentaipb.BatchProcessRequest) (string, error) {
-		// process request
-		op, err := client.BatchProcessDocuments(ctx, req)
-		if err != nil {
-			return "", fmt.Errorf("op: %w", err)
-		}
-		log.Println(op.Metadata())
-
-
-		// Handle the results.
-		resp, err := op.Wait(ctx)
-		if err != nil {
-			return "", fmt.Errorf("wait: %w", err)
-		}
-		// TODO: Use resp.
-		return resp.String(), nil
-
+	// process request
+	op, err := client.BatchProcessDocuments(ctx, req)
+	if err != nil {
+		return "", fmt.Errorf("op: %w", err)
 	}
+	log.Println(op.Metadata())
+
+	// Handle the results.
+	resp, err := op.Wait(ctx)
+	if err != nil {
+		return "", fmt.Errorf("wait: %w", err)
+	}
+	// TODO: Use resp.
+	return resp.String(), nil
+
+}
 
 func formatDocAIReq(processorName string, target string, documents []*documentaipb.GcsDocument) *documentaipb.BatchProcessRequest {
-	 // https://pkg.go.dev/cloud.google.com/go/documentai/apiv1/documentaipb#ProcessRequest
-	 return &documentaipb.BatchProcessRequest{
+	// https://pkg.go.dev/cloud.google.com/go/documentai/apiv1/documentaipb#ProcessRequest
+	return &documentaipb.BatchProcessRequest{
 		Name:            processorName,
 		SkipHumanReview: true,
 		InputDocuments: &documentaipb.BatchDocumentsInputConfig{

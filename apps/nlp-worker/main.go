@@ -1,3 +1,4 @@
+// Package worker is the main application for the nlp-worker service. It is triggered by a storage bucket Finalize event. It submits a file for NLP processing.
 package worker
 
 import (
@@ -13,31 +14,27 @@ import (
 	"google.golang.org/protobuf/encoding/protojson"
 )
 
-
-
-
 func init() {
-        functions.CloudEvent("HelloStorage", helloStorage)
+	functions.CloudEvent("HelloStorage", helloStorage)
 }
 
 // helloStorage consumes a CloudEvent message and logs details about the changed object.
 func helloStorage(ctx context.Context, e event.Event) error {
-        log.Printf("Event ID: %s", e.ID())
-        log.Printf("Event Type: %s", e.Type())
+	log.Printf("Event ID: %s", e.ID())
+	log.Printf("Event Type: %s", e.Type())
 
-        var data storagedata.StorageObjectData
-        if err := protojson.Unmarshal(e.Data(), &data); err != nil {
-                return fmt.Errorf("protojson.Unmarshal: %w", err)
-        }
+	var data storagedata.StorageObjectData
+	if err := protojson.Unmarshal(e.Data(), &data); err != nil {
+		return fmt.Errorf("protojson.Unmarshal: %w", err)
+	}
 
-        log.Printf("Bucket: %s", data.GetBucket())
-        log.Printf("File: %s", data.GetName())
-        log.Printf("Metageneration: %d", data.GetMetageneration())
-        log.Printf("Created: %s", data.GetTimeCreated().AsTime())
-        log.Printf("Updated: %s", data.GetUpdated().AsTime())
-        return nil
+	log.Printf("Bucket: %s", data.GetBucket())
+	log.Printf("File: %s", data.GetName())
+	log.Printf("Metageneration: %d", data.GetMetageneration())
+	log.Printf("Created: %s", data.GetTimeCreated().AsTime())
+	log.Printf("Updated: %s", data.GetUpdated().AsTime())
+	return nil
 }
-
 
 func getCloudEventData(e event.Event) (types.CloudEvent, error) {
 	var msg types.CloudEvent

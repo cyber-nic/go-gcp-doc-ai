@@ -1,3 +1,4 @@
+// Package dispatcher is the main application for the dispatcher service. It reads from a firestore collection and publishes batches of filenames to a pubsub topic.
 package dispatcher
 
 import (
@@ -22,7 +23,7 @@ func init() {
 }
 
 // Dispatcher is an HTTP handler
-func Dispatcher(w http.ResponseWriter, r *http.Request) {
+func Dispatcher(w http.ResponseWriter, _ *http.Request) {
 	// context
 	ctx := context.Background()
 
@@ -175,6 +176,7 @@ func Dispatcher(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	log.Println("(metrics)", "batches:", batchIdx, "files:", fileIdx)
+	w.Write([]byte("ok"))
 }
 
 func writeRefs(ctx context.Context, bucket *storage.BucketHandle, docs []string) []error {
@@ -206,14 +208,10 @@ func existsInRefsBucket(ctx context.Context, bucket *storage.BucketHandle, filen
 		return false, nil
 	}
 	if err != nil {
-	 	log.Fatalf("failed to check refs bucket: %v", err)
+		log.Fatalf("failed to check refs bucket: %v", err)
 	}
 
 	return true, nil
-}
-
-type MessageShema struct {
-	Filenames string `json:"filenames"`
 }
 
 func publishFilenameBatch(ctx context.Context, t *pubsub.Topic, f []string) (string, error) {
@@ -247,18 +245,18 @@ func getMandatoryEnvVar(n string) string {
 }
 
 type appConfig struct {
-	Debug              bool
-	ProjectID          string
-	FireDatabaseID     string
-	FireCollectionName string
-	SrcBucketName      string
-	RefsBucketName     string
+	Debug                bool
+	ProjectID            string
+	FireDatabaseID       string
+	FireCollectionName   string
+	SrcBucketName        string
+	RefsBucketName       string
 	CheckpointBucketName string
-	BatchSize          int
-	MaxFiles           int
-	MaxBatch           int
-	PubsubProjectID    string
-	PubsubTopicID      string
+	BatchSize            int
+	MaxFiles             int
+	MaxBatch             int
+	PubsubProjectID      string
+	PubsubTopicID        string
 }
 
 func getConfig() appConfig {
@@ -290,17 +288,17 @@ func getConfig() appConfig {
 	maxBatch := utils.GetIntEnvVar("MAX_BATCH", 0)
 
 	return appConfig{
-		Debug:              debug,
-		ProjectID:          projectID,
-		FireDatabaseID:     fireDatabaseID,
-		FireCollectionName: fireCollectionName,
-		SrcBucketName:      srcBucketName,
-		RefsBucketName:     refsBucketName,
+		Debug:                debug,
+		ProjectID:            projectID,
+		FireDatabaseID:       fireDatabaseID,
+		FireCollectionName:   fireCollectionName,
+		SrcBucketName:        srcBucketName,
+		RefsBucketName:       refsBucketName,
 		CheckpointBucketName: checkpointBucketName,
-		BatchSize:          batchSize,
-		MaxFiles:           maxFiles,
-		MaxBatch:           maxBatch,
-		PubsubProjectID:    pubsubProjectID,
-		PubsubTopicID:      pubsubTopicID,
+		BatchSize:            batchSize,
+		MaxFiles:             maxFiles,
+		MaxBatch:             maxBatch,
+		PubsubProjectID:      pubsubProjectID,
+		PubsubTopicID:        pubsubTopicID,
 	}
 }

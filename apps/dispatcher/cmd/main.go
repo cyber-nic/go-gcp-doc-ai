@@ -1,3 +1,4 @@
+// package main is the entry point for the dispatcher application.
 package main
 
 import (

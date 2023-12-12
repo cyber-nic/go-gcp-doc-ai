@@ -1,3 +1,4 @@
+// Package main is the main application for the nlp-worker local cmd
 package main
 
 import (

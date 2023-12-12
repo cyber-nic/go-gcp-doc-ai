@@ -50,7 +50,6 @@ func main() {
 	c, err := pubsub.NewClient(ctx, cfg.PubsubProjectID)
 	if err != nil {
 		log.Fatalln("failed to create pubsub client", "project", cfg.PubsubProjectID, "error", err)
-		panic(err)
 	}
 	defer c.Close()
 	log.Println("msg", "pubsub client created", "project", cfg.PubsubProjectID)
