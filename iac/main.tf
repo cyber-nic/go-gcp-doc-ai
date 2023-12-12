@@ -82,12 +82,6 @@ resource "google_storage_bucket" "ocr_data" {
   force_destroy = true
 }
 
-resource "google_storage_bucket" "nlp_err" {
-  name          = "${var.project_prefix}-nlp-err"
-  location      = local.region
-  force_destroy = true
-}
-
 // used by nlp
 resource "google_storage_bucket" "nlp_data" {
   name          = "${var.project_prefix}-nlp-data"
@@ -95,29 +89,20 @@ resource "google_storage_bucket" "nlp_data" {
   force_destroy = true
 }
 
-# ocr pubsub
-
-resource "google_pubsub_topic" "ocr" {
-  name = "ocr"
+resource "google_storage_bucket" "nlp_data_test" {
+  name          = "${var.project_prefix}-nlp-data-test"
+  location      = local.region
+  force_destroy = true
 }
 
-resource "google_pubsub_topic" "ocr_dead_letter" {
-  name = "ocr-dl"
+resource "google_storage_bucket" "nlp_err" {
+  name          = "${var.project_prefix}-nlp-err"
+  location      = local.region
+  force_destroy = true
 }
 
-resource "google_pubsub_subscription" "ocr" {
-  name  = "ocr-sub"
-  topic = google_pubsub_topic.ocr.name
-
-  dead_letter_policy {
-    dead_letter_topic     = google_pubsub_topic.ocr_dead_letter.id
-    max_delivery_attempts = 10
-  }
-
-  ack_deadline_seconds = 10
-}
-
-resource "google_pubsub_subscription" "ocr-dl" {
-  name  = "ocr-dl-sub"
-  topic = google_pubsub_topic.ocr_dead_letter.name
+resource "google_storage_bucket" "nlp_err_test" {
+  name          = "${var.project_prefix}-nlp-err-test"
+  location      = local.region
+  force_destroy = true
 }

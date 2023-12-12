@@ -3,23 +3,21 @@ package worker
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"log"
 
 	"github.com/GoogleCloudPlatform/functions-framework-go/functions"
 	"github.com/cloudevents/sdk-go/v2/event"
-	"github.com/cyber-nic/go-gcp-doc-ai/apps/nlp-worker/libs/types"
 	"github.com/googleapis/google-cloudevents-go/cloud/storagedata"
 	"google.golang.org/protobuf/encoding/protojson"
 )
 
 func init() {
-	functions.CloudEvent("HelloStorage", helloStorage)
+	functions.CloudEvent("Handler", handler)
 }
 
-// helloStorage consumes a CloudEvent message and logs details about the changed object.
-func helloStorage(ctx context.Context, e event.Event) error {
+// entrypoint consumes a CloudEvent message and logs details about the changed object.
+func handler(ctx context.Context, e event.Event) error {
 	log.Printf("Event ID: %s", e.ID())
 	log.Printf("Event Type: %s", e.Type())
 
@@ -36,12 +34,12 @@ func helloStorage(ctx context.Context, e event.Event) error {
 	return nil
 }
 
-func getCloudEventData(e event.Event) (types.CloudEvent, error) {
-	var msg types.CloudEvent
-	err := json.Unmarshal(e.Data(), &msg)
-	if err != nil {
-		fmt.Printf("failed to unmarshal event data: %v\n", err)
-		return msg, err
-	}
-	return msg, nil
-}
+// func getCloudEventData(e event.Event) (types.CloudEvent, error) {
+// 	var msg types.CloudEvent
+// 	err := json.Unmarshal(e.Data(), &msg)
+// 	if err != nil {
+// 		fmt.Printf("failed to unmarshal event data: %v\n", err)
+// 		return msg, err
+// 	}
+// 	return msg, nil
+// }
