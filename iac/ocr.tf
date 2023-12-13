@@ -33,9 +33,9 @@ resource "google_artifact_registry_repository" "ocr" {
   description   = "docker/helm repo for ocr-worker images"
   format        = "docker"
 
-  docker_config {
-    immutable_tags = true
-  }
+  # docker_config {
+  #   immutable_tags = true
+  # }
 }
 
 # service account

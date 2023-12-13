@@ -28,20 +28,20 @@ func main() {
 	// create storage client
 	s, err := storage.NewClient(ctx)
 	if err != nil {
-		log.Fatal().Err(err).Msg("failed to create storage client")
+		log.Fatal().Err(err).Caller().Msg("failed to create storage client")
 	}
 	defer s.Close()
 
 	// ref bucket
 	refsBucket := s.Bucket(cfg.RefsBucketName)
 	if _, err := refsBucket.Attrs(ctx); err != nil {
-		log.Fatal().Err(err).Msg("failed to get refs bucket")
+		log.Fatal().Err(err).Caller().Msg("failed to get refs bucket")
 	}
 
 	// checkpoint
 	checkpointBucket := s.Bucket(cfg.CheckpointBucketName)
 	if _, err := checkpointBucket.Attrs(ctx); err != nil {
-		log.Fatal().Err(err).Msg("failed to get checkpoint bucket")
+		log.Fatal().Err(err).Caller().Msg("failed to get checkpoint bucket")
 	}
 	checkpointObj := checkpointBucket.Object("checkpoint")
 	checkpoint := utils.GetValueFromBucketFile(ctx, checkpointObj)
@@ -50,14 +50,14 @@ func main() {
 	// Initialize Firestore client.
 	db, err := firestore.NewClientWithDatabase(ctx, cfg.ProjectID, cfg.FireDatabaseID)
 	if err != nil {
-		log.Fatal().Err(err).Msg("failed to create Firestore client")
+		log.Fatal().Err(err).Caller().Msg("failed to create Firestore client")
 	}
 	defer db.Close()
 
 	// create pubsub client and topic handler
 	ps, err := pubsub.NewClient(ctx, cfg.ProjectID)
 	if err != nil {
-		log.Fatal().Err(err).Msg("failed to create Pub/Sub client")
+		log.Fatal().Err(err).Caller().Msg("failed to create Pub/Sub client")
 	}
 	topic := ps.Topic(cfg.PubsubTopicID)
 	defer topic.Stop()
@@ -88,7 +88,7 @@ func main() {
 		for _, snap := range snaps {
 			// Limit file count
 			if cfg.MaxFiles > 0 && fileIdx >= cfg.MaxFiles {
-				log.Info().Int("files", fileIdx).Msg("MAX FILES REACHED")
+				log.Info().Int("files", fileIdx).Caller().Msg("MAX FILES REACHED")
 				break
 			}
 			fileIdx++
@@ -102,14 +102,14 @@ func main() {
 			// Marshal the map to a JSON byte slice
 			jsonBytes, err := json.Marshal(snap.Data())
 			if err != nil {
-				log.Fatal().Err(err).Msg("failed to marshal firestore document")
+				log.Fatal().Err(err).Caller().Msg("failed to marshal firestore document")
 			}
 
 			// Unmarshal the JSON data into the struct
 			var imgdoc types.ImageDocument
 			err = json.Unmarshal(jsonBytes, &imgdoc)
 			if err != nil {
-				log.Fatal().Err(err).Msg("failed to unmarshal firestore document")
+				log.Fatal().Err(err).Caller().Msg("failed to unmarshal firestore document")
 			}
 
 			// add file to batch
@@ -130,7 +130,7 @@ func main() {
 			// is error for batch or single file?
 			continue
 		}
-		log.Info().Int("batch id", batchIdx).Int("files", len(docs)).Msgf("published batch %d", batchIdx)
+		log.Info().Int("batch id", batchIdx).Int("files", len(docs)).Caller().Msgf("published batch %d", batchIdx)
 
 		// write refs to refs bucket
 		if errs := writeRefs(ctx, refsBucket, docs); len(errs) > 0 {
@@ -152,7 +152,7 @@ func main() {
 
 		// Limit batch count
 		if cfg.MaxBatch > 0 && batchIdx >= cfg.MaxBatch {
-			log.Info().Int("files", fileIdx).Int("batch", batchIdx).Msg("MAX BATCH REACHED")
+			log.Info().Int("files", fileIdx).Int("batch", batchIdx).Caller().Msg("MAX BATCH REACHED")
 			break
 		}
 	}
@@ -165,7 +165,7 @@ func main() {
 		}
 	}
 
-	log.Info().Int("files", fileIdx).Int("batch", batchIdx).Msg("done")
+	log.Info().Int("files", fileIdx).Int("batch", batchIdx).Caller().Msg("done")
 }
 
 func writeRefs(ctx context.Context, bucket *storage.BucketHandle, docs []string) []error {
@@ -197,7 +197,7 @@ func existsInRefsBucket(ctx context.Context, bucket *storage.BucketHandle, filen
 		return false, nil
 	}
 	if err != nil {
-		log.Fatal().Err(err).Msg("failed to check refs bucket")
+		log.Fatal().Err(err).Caller().Msg("failed to check refs bucket")
 	}
 
 	return true, nil
@@ -229,7 +229,7 @@ func getMandatoryEnvVar(n string) string {
 	if v != "" {
 		return v
 	}
-	log.Fatal().Err(errors.New("missing env var")).Msgf("env var %s required", n)
+	log.Fatal().Err(errors.New("missing env var")).Caller().Msgf("env var %s required", n)
 	return ""
 }
 

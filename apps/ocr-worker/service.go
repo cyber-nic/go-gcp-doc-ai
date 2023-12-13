@@ -93,6 +93,7 @@ func (svc *ocrWorkerSvc) Start() error {
 			m.Nack()
 			return
 		}
+		log.Info().Int("files", len(filenames)).Caller().Msgf("received %d files", len(filenames))
 
 		// Acknowledge the message
 		m.Ack()
@@ -170,7 +171,7 @@ func (svc *ocrWorkerSvc) Stop() {
 func formatDocs(ctx context.Context, b *storage.BucketHandle, filenames []string) []*documentaipb.GcsDocument {
 	var documents []*documentaipb.GcsDocument
 
-	for i, f := range filenames {
+	for _, f := range filenames {
 		// check if file exists in refs bucket
 		if ok, err := existsInRefsBucket(ctx, b, f); err != nil || ok {
 			// todo: if err write to src-err
@@ -182,10 +183,10 @@ func formatDocs(ctx context.Context, b *storage.BucketHandle, filenames []string
 		if err != nil {
 			mime = "image/jpeg"
 		}
-		documents[i] = &documentaipb.GcsDocument{
+		documents = append(documents, &documentaipb.GcsDocument{
 			GcsUri:   f,
 			MimeType: mime,
-		}
+		})
 	}
 	return documents
 }

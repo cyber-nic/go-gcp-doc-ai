@@ -43,7 +43,7 @@ func main() {
 	// pubsub client
 	c, err := pubsub.NewClient(ctx, cfg.ProjectID)
 	if err != nil {
-		log.Fatal().Err(err).Str("project", cfg.ProjectID).Msg("failed to create pubsub client")
+		log.Fatal().Err(err).Str("project", cfg.ProjectID).Caller().Msg("failed to create pubsub client")
 	}
 	defer c.Close()
 
@@ -70,7 +70,7 @@ func main() {
 	endpoint := fmt.Sprintf("%s-documentai.googleapis.com:443", cfg.DocAIProcessorLocation)
 	ai, err := documentai.NewDocumentProcessorClient(ctx, option.WithEndpoint(endpoint))
 	if err != nil {
-		log.Fatal().Err(err).Msg("failed to create Document AI client")
+		log.Fatal().Err(err).Caller().Msg("failed to create Document AI client")
 	}
 	defer ai.Close()
 	// doc ai processor name
@@ -79,14 +79,14 @@ func main() {
 	// create storage client
 	store, err := storage.NewClient(ctx)
 	if err != nil {
-		log.Fatal().Err(err).Msg("failed to create storage client")
+		log.Fatal().Err(err).Caller().Msg("failed to create storage client")
 	}
 	defer store.Close()
 
 	// ref bucket
 	refsBucketHandle := store.Bucket(cfg.RefsBucketName)
 	if _, err := refsBucketHandle.Attrs(ctx); err != nil {
-		log.Fatal().Err(err).Str("bucket", cfg.RefsBucketName).Msg("failed to get refs bucket")
+		log.Fatal().Err(err).Str("bucket", cfg.RefsBucketName).Caller().Msg("failed to get refs bucket")
 	}
 
 	// main service
@@ -119,7 +119,7 @@ func main() {
 
 	// wait for exit
 	<-done
-	log.Info().Msg("exit")
+	log.Info().Caller().Msg("exit")
 }
 
 func startWebServer(svc OCRWorkerSvc, exit chan error, p string) {
@@ -134,7 +134,7 @@ func startWebServer(svc OCRWorkerSvc, exit chan error, p string) {
 			w.WriteHeader(http.StatusInternalServerError)
 			_, _ = w.Write([]byte("not ready"))
 		})
-		log.Info().Str("port", port).Msg(fmt.Sprintf("Serving '/health' on port %s", port))
+		log.Info().Str("port", port).Caller().Msg(fmt.Sprintf("Serving '/health' on port %s", port))
 
 		server := &http.Server{
 			Addr:              port,
@@ -163,7 +163,7 @@ func getMandatoryEnvVar(n string) string {
 	if v != "" {
 		return v
 	}
-	log.Fatal().Msgf("%s required", n)
+	log.Fatal().Caller().Msgf("%s required", n)
 	return ""
 }
 
