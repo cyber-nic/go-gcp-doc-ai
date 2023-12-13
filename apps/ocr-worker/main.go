@@ -4,15 +4,17 @@ package main
 import (
 	"context"
 	"fmt"
-	"log"
 	"net/http"
 	"os"
 	"os/signal"
 	"syscall"
 	"time"
 
+	"github.com/rs/zerolog/log"
+
 	documentai "cloud.google.com/go/documentai/apiv1"
 	"cloud.google.com/go/pubsub"
+	"cloud.google.com/go/storage"
 	"github.com/cyber-nic/go-gcp-doc-ai/apps/ocr-worker/libs/utils"
 	"google.golang.org/api/option"
 )
@@ -41,45 +43,63 @@ func main() {
 	// pubsub client
 	c, err := pubsub.NewClient(ctx, cfg.ProjectID)
 	if err != nil {
-		log.Fatalln("failed to create pubsub client", "project", cfg.ProjectID, "error", err)
+		log.Fatal().Err(err).Str("project", cfg.ProjectID).Msg("failed to create pubsub client")
 	}
 	defer c.Close()
-	log.Println("msg", "pubsub client created", "project", cfg.ProjectID)
 
 	// pubsub topic
 	t := c.Topic(cfg.PubsubTopicID)
 	if ok, err := t.Exists(ctx); err != nil || !ok {
-		log.Fatalln("pubsub topic failed", "project", cfg.ProjectID, "topic", cfg.PubsubTopicID, "error", err)
+		log.Fatal().Err(err).
+			Str("project", cfg.ProjectID).
+			Str("topic", cfg.PubsubTopicID).
+			Msg("pubsub topic failed")
 	}
 
 	// pubsub subscription
 	s := c.Subscription(cfg.PubsubSubscriptionID)
 	if ok, err := s.Exists(ctx); err != nil || !ok {
-		log.Fatalln("pubsub subscription failed", "project", cfg.ProjectID, "subscription", cfg.PubsubSubscriptionID, "error", err)
+		log.Fatal().Err(err).
+			Str("project", cfg.ProjectID).
+			Str("topic", cfg.PubsubTopicID).
+			Str("subscription", cfg.PubsubSubscriptionID).
+			Msg("pubsub subscription failed")
 	}
 
 	// doc ai processor
 	endpoint := fmt.Sprintf("%s-documentai.googleapis.com:443", cfg.DocAIProcessorLocation)
 	ai, err := documentai.NewDocumentProcessorClient(ctx, option.WithEndpoint(endpoint))
 	if err != nil {
-		log.Fatalf("error creating Document AI client: %v", err)
+		log.Fatal().Err(err).Msg("failed to create Document AI client")
 	}
 	defer ai.Close()
 	// doc ai processor name
 	proc := fmt.Sprintf("projects/%s/locations/%s/processors/%s", cfg.ProjectID, cfg.DocAIProcessorLocation, cfg.DocAIProcessorID)
 
+	// create storage client
+	store, err := storage.NewClient(ctx)
+	if err != nil {
+		log.Fatal().Err(err).Msg("failed to create storage client")
+	}
+	defer store.Close()
+
+	// ref bucket
+	refsBucketHandle := store.Bucket(cfg.RefsBucketName)
+	if _, err := refsBucketHandle.Attrs(ctx); err != nil {
+		log.Fatal().Err(err).Str("bucket", cfg.RefsBucketName).Msg("failed to get refs bucket")
+	}
+
 	// main service
 	svc := NewOCRWorkerSvc(ctx, &SvcOptions{
-		Topic:                t,
-		Subscription:         s,
-		AIClient:             ai,
-		AIProcessorName:      proc,
-		DestinationBucketURI: fmt.Sprintf("gs://%s", cfg.DstBucketName),
+		Topic:            t,
+		Subscription:     s,
+		AIClient:         ai,
+		AIProcessorName:  proc,
+		DstBucketName:    cfg.DstBucketName,
+		RefsBucketHandle: refsBucketHandle,
 	})
 	go func() {
-		if err := svc.Start(); err != nil {
-			log.Fatalf("service failed: %v", err)
-		}
+		done <- svc.Start()
 	}()
 
 	// enable context cancelling
@@ -96,7 +116,10 @@ func main() {
 
 	// metrics and health
 	startWebServer(svc, done, cfg.Port)
-	log.Println("exit", <-done)
+
+	// wait for exit
+	<-done
+	log.Info().Msg("exit")
 }
 
 func startWebServer(svc OCRWorkerSvc, exit chan error, p string) {
@@ -111,7 +134,7 @@ func startWebServer(svc OCRWorkerSvc, exit chan error, p string) {
 			w.WriteHeader(http.StatusInternalServerError)
 			_, _ = w.Write([]byte("not ready"))
 		})
-		log.Print("msg", fmt.Sprintf("Serving '/health' on port %s", port))
+		log.Info().Str("port", port).Msg(fmt.Sprintf("Serving '/health' on port %s", port))
 
 		server := &http.Server{
 			Addr:              port,
@@ -129,7 +152,7 @@ type appConfig struct {
 	DocAIProcessorLocation string
 	DstBucketName          string
 	ErrBucketName          string
-	RefBucketName          string
+	RefsBucketName         string
 	PubsubTopicID          string
 	PubsubSubscriptionID   string
 	DocAIMaxReqPerMinute   int
@@ -140,7 +163,7 @@ func getMandatoryEnvVar(n string) string {
 	if v != "" {
 		return v
 	}
-	log.Fatalf("%s required", n)
+	log.Fatal().Msgf("%s required", n)
 	return ""
 }
 
@@ -154,7 +177,7 @@ func getConfig() appConfig {
 	// buckets
 	dstBucketName := getMandatoryEnvVar("DST_BUCKET_NAME")
 	errBucketName := getMandatoryEnvVar("ERR_BUCKET_NAME")
-	refBucketName := getMandatoryEnvVar("REF_BUCKET_NAME")
+	refsBucketName := getMandatoryEnvVar("REFS_BUCKET_NAME")
 
 	// pubsub
 	pubsubTopicID := getMandatoryEnvVar("PUBSUB_TOPIC_ID")
@@ -172,7 +195,7 @@ func getConfig() appConfig {
 		Port:                   port,
 		ProjectID:              projectID,
 		DstBucketName:          dstBucketName,
-		RefBucketName:          refBucketName,
+		RefsBucketName:         refsBucketName,
 		ErrBucketName:          errBucketName,
 		PubsubTopicID:          pubsubTopicID,
 		PubsubSubscriptionID:   pubsubSubID,

@@ -1,29 +1,22 @@
-// Package dispatcher is the main application for the dispatcher service. It reads from a firestore collection and publishes batches of filenames to a pubsub topic.
-package dispatcher
+// Package main is the main application for the dispatcher service. It reads from a firestore collection and publishes batches of filenames to a pubsub topic.
+package main
 
 import (
 	"context"
 	"encoding/json"
 	"fmt"
 	"log"
-	"net/http"
 	"os"
 
 	"cloud.google.com/go/firestore"
 	"cloud.google.com/go/pubsub"
 	"cloud.google.com/go/storage"
-	"github.com/GoogleCloudPlatform/functions-framework-go/functions"
 	"github.com/cyber-nic/go-gcp-doc-ai/apps/dispatcher/libs/types"
 	"github.com/cyber-nic/go-gcp-doc-ai/apps/dispatcher/libs/utils"
 )
 
-func init() {
-	// Register HTTP function with the Functions Framework
-	functions.HTTP("dispatch", Dispatcher)
-}
-
 // Dispatcher is an HTTP handler
-func Dispatcher(w http.ResponseWriter, _ *http.Request) {
+func main() {
 	// context
 	ctx := context.Background()
 
@@ -99,8 +92,7 @@ func Dispatcher(w http.ResponseWriter, _ *http.Request) {
 			fileIdx++
 
 			// Check if file was already processed
-			ok, err := existsInRefsBucket(ctx, refsBucket, snap.Ref.ID)
-			if err != nil || ok {
+			if ok, err := existsInRefsBucket(ctx, refsBucket, snap.Ref.ID); err != nil || ok {
 				// todo: if err write to src-err
 				continue
 			}
@@ -176,7 +168,6 @@ func Dispatcher(w http.ResponseWriter, _ *http.Request) {
 		return
 	}
 	log.Println("(metrics)", "batches:", batchIdx, "files:", fileIdx)
-	w.Write([]byte("ok"))
 }
 
 func writeRefs(ctx context.Context, bucket *storage.BucketHandle, docs []string) []error {

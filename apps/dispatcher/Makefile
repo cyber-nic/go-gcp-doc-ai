@@ -5,4 +5,4 @@ test:
 	go test -v ./...
 
 run:
-	gow run ./cmd
+	go run .

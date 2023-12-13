@@ -21,14 +21,18 @@ resource "google_service_account" "nlp" {
   display_name = "nlp Service Account"
 }
 
-resource "google_project_iam_custom_role" "nlp" {
-  role_id     = "nlp"
-  title       = "nlp"
-  description = "Custom Role for nlp Cloud Function Storage Access"
-  permissions = [
-    "storage.objects.get",
-    "storage.objects.list",
-  ]
+resource "google_storage_bucket_iam_member" "nlp_data_viewer" {
+  // ocr_data is the nlp input
+  bucket = google_storage_bucket.ocr_data.name
+  role   = "roles/storage.objectViewer"
+  member = "serviceAccount:${google_service_account.nlp.email}"
+}
+
+resource "google_storage_bucket_iam_member" "nlp_err_editor" {
+  // ocr_data is the nlp input
+  bucket = google_storage_bucket.nlp_err.name
+  role   = "roles/storage.objectUser"
+  member = "serviceAccount:${google_service_account.nlp.email}"
 }
 
 // allow eventarc to invoke function
@@ -50,18 +54,11 @@ resource "google_project_iam_member" "nlp_eventarc_receiver" {
   member  = "serviceAccount:${google_service_account.nlp.email}"
 }
 
-resource "google_storage_bucket_iam_member" "nlp_storage" {
-  // ocr_data is the nlp input
-  bucket     = google_storage_bucket.ocr_data.name
-  role       = google_project_iam_custom_role.nlp.name
-  member     = "serviceAccount:${google_service_account.nlp.email}"
-  depends_on = [google_project_iam_custom_role.nlp]
-}
 
 ## deploy
 
 resource "google_storage_bucket" "nlp_deploy" {
-  name                        = "${var.project_prefix}-func-deploy-nlp"
+  name                        = "${var.resource_name_prefix}-func-deploy-nlp"
   location                    = local.region
   uniform_bucket_level_access = true
 }
@@ -78,7 +75,6 @@ resource "google_storage_bucket_object" "nlp_deploy" {
   bucket = google_storage_bucket.nlp_deploy.name
   source = data.archive_file.nlp.output_path
 }
-
 
 resource "google_cloudfunctions2_function" "nlp" {
   name        = "nlp"

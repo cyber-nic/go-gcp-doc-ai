@@ -11,52 +11,61 @@ resource "google_firestore_database" "database" {
 
 // used by deduper
 resource "google_storage_bucket" "src_checkpoint" {
-  name          = "${var.project_prefix}-src-checkpoint"
+  name          = "${var.resource_name_prefix}-src-checkpoint"
   location      = local.region
   force_destroy = true
 }
 
 // used by dispatcher
 resource "google_storage_bucket" "dispatcher_checkpoint" {
-  name          = "${var.project_prefix}-dispatcher-checkpoint"
+  name          = "${var.resource_name_prefix}-dispatcher-checkpoint"
   location      = local.region
   force_destroy = true
 }
 
 resource "google_storage_bucket" "dispatcher_refs" {
-  name          = "${var.project_prefix}-dispatcher-refs"
+  name          = "${var.resource_name_prefix}-dispatcher-refs"
   location      = local.region
   force_destroy = true
 }
 
 // used by ocr-worker
 resource "google_storage_bucket" "ocr_err" {
-  name          = "${var.project_prefix}-ocr-err"
+  name          = "${var.resource_name_prefix}-ocr-err"
   location      = local.region
   force_destroy = true
 }
 
 resource "google_storage_bucket" "ocr_refs" {
-  name          = "${var.project_prefix}-ocr-refs"
+  name          = "${var.resource_name_prefix}-ocr-refs"
   location      = local.region
   force_destroy = true
 }
 
 resource "google_storage_bucket" "ocr_data" {
-  name          = "${var.project_prefix}-ocr-data"
+  name          = "${var.resource_name_prefix}-ocr-data"
   location      = local.region
   force_destroy = true
 }
 
 // used by nlp-worker
 resource "google_storage_bucket" "nlp_data" {
-  name          = "${var.project_prefix}-nlp-data"
+  name          = "${var.resource_name_prefix}-nlp-data"
   location      = local.region
   force_destroy = true
 }
 
 resource "google_storage_bucket" "nlp_err" {
-  name          = "${var.project_prefix}-nlp-err"
+  name          = "${var.resource_name_prefix}-nlp-err"
   location      = local.region
   force_destroy = true
+}
+
+resource "google_project_iam_custom_role" "bucket_attr_reader" {
+  role_id     = "bucketAttrReader"
+  title       = "Bucket Attribute Reader"
+  description = "Custom Role for to allow reading bucket attrs"
+  permissions = [
+    "storage.buckets.get",
+  ]
 }

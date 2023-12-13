@@ -6,20 +6,28 @@ variable "project_id" {
   type = string
 }
 
-variable "project_prefix" {
+variable "resource_name_prefix" {
   type = string
 }
 
-# nlp
-variable "nlp_debug" {
+# ocr
+variable "ocr_min_instances" {
+  type    = number
+  default = 0
+}
+
+variable "ocr_max_instances" {
+  type    = number
+  default = 5
+}
+
+variable "ocr_debug" {
   type    = bool
   default = false
 }
 
-# ocr
-variable "ocr_debug" {
-  type    = bool
-  default = false
+variable "ocr_build_version" {
+  type = string
 }
 
 variable "ocr_pubsub_topic_id" {
@@ -48,4 +56,10 @@ variable "ocr_doc_ai_processor_location" {
 
 variable "ocr_doc_ai_processor_id" {
   type = string
+}
+
+# nlp
+variable "nlp_debug" {
+  type    = bool
+  default = false
 }

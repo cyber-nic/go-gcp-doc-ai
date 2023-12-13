@@ -33,7 +33,7 @@ resource "google_artifact_registry_repository" "ocr" {
   description   = "docker/helm repo for ocr-worker images"
   format        = "docker"
 
-   docker_config {
+  docker_config {
     immutable_tags = true
   }
 }
@@ -75,16 +75,33 @@ resource "google_project_iam_member" "ocr_document_ai" {
 # // https://cloud.google.com/storage/docs/access-control/iam-roles
 resource "google_storage_bucket_iam_member" "ocr_err" {
   bucket     = google_storage_bucket.ocr_err.name
-  role       = "roles/storage.objectCreator"
+  role       = "roles/storage.objectUser"
   member     = "serviceAccount:${google_service_account.ocr.email}"
   depends_on = [google_storage_bucket.ocr_err]
 }
+
+resource "google_storage_bucket_iam_member" "ocr_err_attrs" {
+  bucket     = google_storage_bucket.ocr_err.name
+  member     = "serviceAccount:${google_service_account.nlp.email}"
+  role       = google_project_iam_custom_role.bucket_attr_reader.name
+  depends_on = [google_project_iam_custom_role.bucket_attr_reader]
+}
+
+
 resource "google_storage_bucket_iam_member" "ocr_refs" {
   bucket     = google_storage_bucket.ocr_refs.name
-  role       = "roles/storage.objectCreator"
+  role       = "roles/storage.objectUser"
   member     = "serviceAccount:${google_service_account.ocr.email}"
   depends_on = [google_storage_bucket.ocr_refs]
 }
+
+resource "google_storage_bucket_iam_member" "ocr_refs_attrs" {
+  bucket     = google_storage_bucket.ocr_refs.name
+  member     = "serviceAccount:${google_service_account.nlp.email}"
+  role       = google_project_iam_custom_role.bucket_attr_reader.name
+  depends_on = [google_project_iam_custom_role.bucket_attr_reader]
+}
+
 
 # cloud run
 resource "google_cloud_run_service" "ocr" {
@@ -94,14 +111,14 @@ resource "google_cloud_run_service" "ocr" {
   template {
     metadata {
       annotations = {
-        "autoscaling.knative.dev/minScale" = "0"
-        "autoscaling.knative.dev/maxScale" = "5"
+        "autoscaling.knative.dev/minScale" = var.ocr_min_instances
+        "autoscaling.knative.dev/maxScale" = var.ocr_max_instances
       }
     }
     spec {
       service_account_name = google_service_account.ocr.email
       containers {
-        image = "${local.region}-docker.pkg.dev/${var.project_id}/${google_artifact_registry_repository.ocr.name}/app:latest"
+        image = "${local.region}-docker.pkg.dev/${var.project_id}/${google_artifact_registry_repository.ocr.name}/app:${var.ocr_build_version}"
         ports {
           container_port = 5000
         }
@@ -123,7 +140,7 @@ resource "google_cloud_run_service" "ocr" {
           value = var.ocr_dst_bucket_name
         }
         env {
-          name  = "REF_BUCKET_NAME"
+          name  = "REFS_BUCKET_NAME"
           value = var.ocr_refs_bucket_name
         }
         env {
