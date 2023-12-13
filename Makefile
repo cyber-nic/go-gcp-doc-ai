@@ -1,22 +1,8 @@
+# Makefile
+
 build:
-	go build -o ./bin/app ./src
-
-test:
-	go test -v ./worker/...
-
-# run-worker
-rw:
-	go run ./apps/ocr-worker/cmd
-
-run-worker:
-	go run ./apps/ocr-worker/cmd
-
-debug:
-	go run ./src -debug=true
-
-build-worker:
-	go build ./worker-cmd -o ./bin/worker
-
-
-cover:
-  coverage.out && go tool cover -html=coverage.out
+	# requires source ./local.env
+	gcloud auth configure-docker $REGION
+	docker build -t "${OCR_ARTIFACT_REGISTRY_URI}/app:${OCR_BUILD_VERSION}" -f ./apps/ocr-worker/Dockerfile .
+	docker images | head -n2
+	docker push "${OCR_ARTIFACT_REGISTRY_URI}/app:${OCR_BUILD_VERSION}"

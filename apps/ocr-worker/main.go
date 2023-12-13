@@ -17,14 +17,6 @@ import (
 	"google.golang.org/api/option"
 )
 
-const (
-	exitCodeInterrupt = 2
-)
-
-var (
-	debug *bool
-)
-
 func main() {
 	// app config
 	cfg := getConfig()
@@ -47,23 +39,23 @@ func main() {
 	}()
 
 	// pubsub client
-	c, err := pubsub.NewClient(ctx, cfg.PubsubProjectID)
+	c, err := pubsub.NewClient(ctx, cfg.ProjectID)
 	if err != nil {
-		log.Fatalln("failed to create pubsub client", "project", cfg.PubsubProjectID, "error", err)
+		log.Fatalln("failed to create pubsub client", "project", cfg.ProjectID, "error", err)
 	}
 	defer c.Close()
-	log.Println("msg", "pubsub client created", "project", cfg.PubsubProjectID)
+	log.Println("msg", "pubsub client created", "project", cfg.ProjectID)
 
 	// pubsub topic
 	t := c.Topic(cfg.PubsubTopicID)
 	if ok, err := t.Exists(ctx); err != nil || !ok {
-		log.Fatalln("pubsub topic failed", "project", cfg.PubsubProjectID, "topic", cfg.PubsubTopicID, "error", err)
+		log.Fatalln("pubsub topic failed", "project", cfg.ProjectID, "topic", cfg.PubsubTopicID, "error", err)
 	}
 
 	// pubsub subscription
 	s := c.Subscription(cfg.PubsubSubscriptionID)
 	if ok, err := s.Exists(ctx); err != nil || !ok {
-		log.Fatalln("pubsub subscription failed", "project", cfg.PubsubProjectID, "subscription", cfg.PubsubSubscriptionID, "error", err)
+		log.Fatalln("pubsub subscription failed", "project", cfg.ProjectID, "subscription", cfg.PubsubSubscriptionID, "error", err)
 	}
 
 	// doc ai processor
@@ -90,7 +82,7 @@ func main() {
 		}
 	}()
 
-	// allow context cancelling
+	// enable context cancelling
 	go func() {
 		select {
 		case <-signalChan: // first signal, cancel context
@@ -99,7 +91,7 @@ func main() {
 		case <-ctx.Done():
 		}
 		<-signalChan // second signal, hard exit
-		os.Exit(exitCodeInterrupt)
+		os.Exit(2)
 	}()
 
 	// metrics and health
@@ -138,7 +130,6 @@ type appConfig struct {
 	DstBucketName          string
 	ErrBucketName          string
 	RefBucketName          string
-	PubsubProjectID        string
 	PubsubTopicID          string
 	PubsubSubscriptionID   string
 	DocAIMaxReqPerMinute   int
@@ -166,7 +157,6 @@ func getConfig() appConfig {
 	refBucketName := getMandatoryEnvVar("REF_BUCKET_NAME")
 
 	// pubsub
-	pubsubProjectID := getMandatoryEnvVar("PUBSUB_PROJECT_ID")
 	pubsubTopicID := getMandatoryEnvVar("PUBSUB_TOPIC_ID")
 	pubsubSubID := getMandatoryEnvVar("PUBSUB_SUBSCRIPTION_ID")
 
@@ -184,7 +174,6 @@ func getConfig() appConfig {
 		DstBucketName:          dstBucketName,
 		RefBucketName:          refBucketName,
 		ErrBucketName:          errBucketName,
-		PubsubProjectID:        pubsubProjectID,
 		PubsubTopicID:          pubsubTopicID,
 		PubsubSubscriptionID:   pubsubSubID,
 		DocAIMaxReqPerMinute:   docAIMaxReqPerMinute,

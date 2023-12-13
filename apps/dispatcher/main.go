@@ -255,7 +255,6 @@ type appConfig struct {
 	BatchSize            int
 	MaxFiles             int
 	MaxBatch             int
-	PubsubProjectID      string
 	PubsubTopicID        string
 }
 
@@ -275,7 +274,6 @@ func getConfig() appConfig {
 	fireCollectionName := getMandatoryEnvVar("FIRESTORE_COLLECTION_NAME")
 
 	// pubsub
-	pubsubProjectID := getMandatoryEnvVar("PUBSUB_PROJECT_ID")
 	pubsubTopicID := getMandatoryEnvVar("PUBSUB_TOPIC_ID")
 
 	// limits
@@ -298,7 +296,6 @@ func getConfig() appConfig {
 		BatchSize:            batchSize,
 		MaxFiles:             maxFiles,
 		MaxBatch:             maxBatch,
-		PubsubProjectID:      pubsubProjectID,
 		PubsubTopicID:        pubsubTopicID,
 	}
 }

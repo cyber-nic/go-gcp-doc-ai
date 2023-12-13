@@ -106,7 +106,7 @@ resource "google_cloudfunctions2_function" "nlp" {
       DEBUG                 = var.nlp_debug
       GCP_PROJECT_ID        = var.project_id
       FIRESTORE_DATABASE_ID = var.project_id
-      ERR_BUCKET_NAME       = google_storage_bucket.nlp_err_test.name
+      ERR_BUCKET_NAME       = google_storage_bucket.nlp_err.name
       DST_BUCKET_PREFIX     = google_storage_bucket.nlp_data.name
     }
     ingress_settings = "ALLOW_INTERNAL_ONLY"
