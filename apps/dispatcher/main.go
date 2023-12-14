@@ -38,15 +38,6 @@ func main() {
 		log.Fatal().Err(err).Caller().Msg("failed to get refs bucket")
 	}
 
-	// checkpoint
-	checkpointBucket := s.Bucket(cfg.CheckpointBucketName)
-	if _, err := checkpointBucket.Attrs(ctx); err != nil {
-		log.Fatal().Err(err).Caller().Msg("failed to get checkpoint bucket")
-	}
-	checkpointObj := checkpointBucket.Object("checkpoint")
-	checkpoint := utils.GetValueFromBucketFile(ctx, checkpointObj)
-	log.Info().Msgf("(checkpoint) %s\n", checkpoint)
-
 	// Initialize Firestore client.
 	db, err := firestore.NewClientWithDatabase(ctx, cfg.ProjectID, cfg.FireDatabaseID)
 	if err != nil {
@@ -62,6 +53,23 @@ func main() {
 	topic := ps.Topic(cfg.PubsubTopicID)
 	defer topic.Stop()
 
+	// checkpoint
+	checkpointBucket := s.Bucket(cfg.CheckpointBucketName)
+	if _, err := checkpointBucket.Attrs(ctx); err != nil {
+		log.Fatal().Err(err).Caller().Msg("failed to get checkpoint bucket")
+	}
+	checkpointObj := checkpointBucket.Object("checkpoint")
+	checkpoint := utils.GetValueFromBucketFile(ctx, checkpointObj)
+	log.Info().
+		Str("checkpoint", shortStr(checkpoint, 12)).
+		Msgf("initial checkpoint: %s", func() string {
+			if checkpoint != "" {
+				return shortStr(checkpoint, 12)
+			} else {
+				return "(none)"
+			}
+		}())
+
 	// build query
 	query := db.Collection(cfg.FireCollectionName).OrderBy("hash", firestore.Asc).StartAfter(checkpoint).Limit(cfg.BatchSize)
 
@@ -72,6 +80,7 @@ func main() {
 
 	// init doc batch
 	docs := []string{}
+	imgIDs := []string{}
 
 	// Iterate through all objects in the firestore collection
 Batch:
@@ -88,17 +97,8 @@ Batch:
 		newCheckpoint := ""
 
 		// process batch
-		Snap:
+	Snap:
 		for _, snap := range snaps {
-			// Limit file count
-			if cfg.MaxFiles > 0 && batchedFilesCnt >= cfg.MaxFiles {
-				log.Info().Caller().
-					Int("files", fileIdx).
-					Int("sent files", batchedFilesCnt).
-					Msg("MAX FILES REACHED")
-				// exit the Batch loop
-				break Batch
-			}
 			fileIdx++
 
 			// Check if file was already processed
@@ -122,7 +122,8 @@ Batch:
 
 			// add file to batch
 			docs = append(docs, fmt.Sprintf("gs://%s/%s", cfg.SrcBucketName, imgdoc.ImagePaths[0]))
-			newCheckpoint = imgdoc.ImagePaths[0]
+			imgIDs = append(imgIDs, snap.Ref.ID)
+			newCheckpoint = snap.Ref.ID
 		}
 
 		// in the odd event all docs returned from firestore were already processed
@@ -130,66 +131,95 @@ Batch:
 			continue Batch
 		}
 
-		// Send batch
+		if cfg.Debug {
+			for i := range docs {
+				fmt.Printf("%d  %s     %s\n", i, imgIDs[i], docs[i])
+			}
+		}
+
+		// send batch
 		_, err = publishFilenameBatch(ctx, topic, docs)
 		if err != nil {
 			log.Error().Err(err).Caller().Msg("failed to publish pubsub batch")
-			// Handle error
-			// is error for batch or single file?
 			continue Batch
 		}
 
 		// inc batch count and log
 		batchIdx++
 		batchedFilesCnt += len(docs)
-		log.Info().Caller().
+		log.Info().
 			Int("files processed", fileIdx).
 			Int("files sent", batchedFilesCnt).
 			Int("batch id", batchIdx).
 			Int("files in latest batch", len(docs)).
-			Msgf("published batch %d", batchIdx)
+			Msgf("batch %d published (%d files)", batchIdx, batchedFilesCnt)
 
 		// write refs to refs bucket
-		if errs := writeRefs(ctx, refsBucket, docs); len(errs) > 0 {
+		if errs := writeRefs(ctx, refsBucket, imgIDs); len(errs) > 0 {
 			log.Error().Err(err).Caller().Msg("failed to write refs")
 		}
 
 		// update checkpoint
 		if checkpoint != newCheckpoint {
-			log.Info().Caller().
-				Str("checkpoint", checkpoint).
+			log.Info().
 				Int("files", fileIdx).
-				Str("next", newCheckpoint).
-				Msgf("(checkpoint) %d next: %s\n", fileIdx, newCheckpoint)
+				Str("checkpoint", shortStr(checkpoint, 12)).
+				Str("next", shortStr(newCheckpoint, 12)).
+				Msgf("%d files processed, next checkpoint: %s", fileIdx, shortStr(newCheckpoint, 12))
 			utils.SetBucketFileValue(ctx, checkpointObj, newCheckpoint)
 			checkpoint = newCheckpoint
 		}
 
 		// reset docs
 		docs = []string{}
+		imgIDs = []string{}
+
+		// Limit file count
+		if cfg.MaxFiles > 0 && batchedFilesCnt >= cfg.MaxFiles {
+			log.Info().
+				Int("files", fileIdx).
+				Int("max", cfg.MaxFiles).
+				Int("sent files", batchedFilesCnt).
+				Msg("MAX FILES REACHED")
+			// exit the Batch loop
+			break Batch
+		}
 
 		// Limit batch count
 		if cfg.MaxBatch > 0 && batchIdx >= cfg.MaxBatch {
-			log.Info().Caller().Int("files", fileIdx).Int("batch", batchIdx).Msg("MAX BATCH REACHED")
+			log.Info().Int("files", fileIdx).Int("batch", batchIdx).Msg("MAX BATCH REACHED")
 			break Batch
 		}
 	}
 
 	// Send any remaining files in a final batch
 	if len(docs) > 0 {
-		// write refs to refs bucket
-		if errs := writeRefs(ctx, refsBucket, docs); len(errs) > 0 {
-			for _, err := range errs {
-				log.Error().Err(err).Caller().Msg("failed to write ref")
+		// Send batch
+		_, err = publishFilenameBatch(ctx, topic, docs)
+		if err != nil {
+			log.Error().Err(err).Caller().Msg("failed to publish pubsub batch")
+		} else {
+			// write refs to refs bucket
+			if errs := writeRefs(ctx, refsBucket, imgIDs); len(errs) > 0 {
+				for _, err := range errs {
+					log.Error().Err(err).Caller().Msg("failed to write ref")
+				}
 			}
 		}
 	}
 
-	log.Info().Caller().
+	log.Info().
 		Int("files processed", fileIdx).
 		Int("files sent", batchedFilesCnt).
 		Int("batch count", batchIdx).
 		Msg("done")
+}
+
+func shortStr(s string, i int) string {
+	if len(s) > i {
+		return s[:i]
+	}
+	return s
 }
 
 func writeRefs(ctx context.Context, bucket *storage.BucketHandle, docs []string) []error {

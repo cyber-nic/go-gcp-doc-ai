@@ -18,6 +18,9 @@ func init() {
 
 // entrypoint consumes a CloudEvent message and logs details about the changed object.
 func handler(ctx context.Context, e event.Event) error {
+
+	log.Println(e)
+	log.Println(e.Data())
 	log.Printf("Event ID: %s", e.ID())
 	log.Printf("Event Type: %s", e.Type())
 

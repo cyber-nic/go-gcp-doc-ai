@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/rs/zerolog"
@@ -247,10 +248,11 @@ func submitDocAIBatch(
 	// https://github.com/googleapis/googleapis/blob/master/google/rpc/code.proto
 	// log individual process status
 	for _, i := range meta.IndividualProcessStatuses {
+		filename := strings.Replace(i.InputGcsSource, "gs://", "", 1)
 		if i.Status.Code == 0 {
-			success = append(success, KV{ Key: i.InputGcsSource, Value: ""})
+			success = append(success, KV{ Key: filename, Value: ""})
 		} else {
-			failures = append(failures, KV{ Key: i.InputGcsSource, Value: i.Status.Message})
+			failures = append(failures, KV{ Key: fmt.Sprintf("%s.log", filename), Value: i.Status.Message})
 			// log
 			log.Error().Err(errors.New(i.Status.Message)).Caller().
 				Int32("StatusCode", i.Status.Code).
