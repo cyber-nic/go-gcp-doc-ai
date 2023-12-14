@@ -80,8 +80,6 @@ func GetValueFromBucketFile(ctx context.Context, o *storage.ObjectHandle) string
 
 	r, err := o.NewReader(ctx)
 	if err != nil {
-		// fail is unexpected error
-		log.Print(err)
 		log.Fatalf("failed to create %s reader: %v", o.ObjectName(), err)
 	}
 

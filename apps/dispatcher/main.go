@@ -45,7 +45,7 @@ func main() {
 	}
 	checkpointObj := checkpointBucket.Object("checkpoint")
 	checkpoint := utils.GetValueFromBucketFile(ctx, checkpointObj)
-	log.Printf("(checkpoint) %s\n", checkpoint)
+	log.Info().Msgf("(checkpoint) %s\n", checkpoint)
 
 	// Initialize Firestore client.
 	db, err := firestore.NewClientWithDatabase(ctx, cfg.ProjectID, cfg.FireDatabaseID)
@@ -67,36 +67,44 @@ func main() {
 
 	// track files and batches counts
 	fileIdx := 0
+	batchedFilesCnt := 0
 	batchIdx := 0
 
 	// init doc batch
 	docs := []string{}
 
 	// Iterate through all objects in the firestore collection
+Batch:
 	for {
 		snaps, err := query.Documents(ctx).GetAll()
 		if err != nil {
-			break
+			break Batch
 		}
 		if len(snaps) == 0 {
-			break // No more documents
+			break Batch // No more documents
 		}
 
+		// new checkpoint var
 		newCheckpoint := ""
 
 		// process batch
+		Snap:
 		for _, snap := range snaps {
 			// Limit file count
-			if cfg.MaxFiles > 0 && fileIdx >= cfg.MaxFiles {
-				log.Info().Int("files", fileIdx).Caller().Msg("MAX FILES REACHED")
-				break
+			if cfg.MaxFiles > 0 && batchedFilesCnt >= cfg.MaxFiles {
+				log.Info().Caller().
+					Int("files", fileIdx).
+					Int("sent files", batchedFilesCnt).
+					Msg("MAX FILES REACHED")
+				// exit the Batch loop
+				break Batch
 			}
 			fileIdx++
 
 			// Check if file was already processed
 			if ok, err := existsInRefsBucket(ctx, refsBucket, snap.Ref.ID); err != nil || ok {
 				// todo: if err write to src-err
-				continue
+				continue Snap
 			}
 
 			// Marshal the map to a JSON byte slice
@@ -119,41 +127,51 @@ func main() {
 
 		// in the odd event all docs returned from firestore were already processed
 		if len(docs) == 0 {
-			continue
+			continue Batch
 		}
 
 		// Send batch
 		_, err = publishFilenameBatch(ctx, topic, docs)
 		if err != nil {
-			log.Printf("failed to publish pubsub batch: %v", err)
+			log.Error().Err(err).Caller().Msg("failed to publish pubsub batch")
 			// Handle error
 			// is error for batch or single file?
-			continue
+			continue Batch
 		}
-		log.Info().Int("batch id", batchIdx).Int("files", len(docs)).Caller().Msgf("published batch %d", batchIdx)
+
+		// inc batch count and log
+		batchIdx++
+		batchedFilesCnt += len(docs)
+		log.Info().Caller().
+			Int("files processed", fileIdx).
+			Int("files sent", batchedFilesCnt).
+			Int("batch id", batchIdx).
+			Int("files in latest batch", len(docs)).
+			Msgf("published batch %d", batchIdx)
 
 		// write refs to refs bucket
 		if errs := writeRefs(ctx, refsBucket, docs); len(errs) > 0 {
-			log.Printf("failed to write refs: %v", err)
+			log.Error().Err(err).Caller().Msg("failed to write refs")
 		}
 
 		// update checkpoint
 		if checkpoint != newCheckpoint {
-			log.Printf("(checkpoint) %d next: %s\n", fileIdx, newCheckpoint)
+			log.Info().Caller().
+				Str("checkpoint", checkpoint).
+				Int("files", fileIdx).
+				Str("next", newCheckpoint).
+				Msgf("(checkpoint) %d next: %s\n", fileIdx, newCheckpoint)
 			utils.SetBucketFileValue(ctx, checkpointObj, newCheckpoint)
 			checkpoint = newCheckpoint
 		}
-
-		// inc batch count
-		batchIdx++
 
 		// reset docs
 		docs = []string{}
 
 		// Limit batch count
 		if cfg.MaxBatch > 0 && batchIdx >= cfg.MaxBatch {
-			log.Info().Int("files", fileIdx).Int("batch", batchIdx).Caller().Msg("MAX BATCH REACHED")
-			break
+			log.Info().Caller().Int("files", fileIdx).Int("batch", batchIdx).Msg("MAX BATCH REACHED")
+			break Batch
 		}
 	}
 
@@ -161,19 +179,23 @@ func main() {
 	if len(docs) > 0 {
 		// write refs to refs bucket
 		if errs := writeRefs(ctx, refsBucket, docs); len(errs) > 0 {
-			log.Printf("failed to write refs: %v", err)
+			for _, err := range errs {
+				log.Error().Err(err).Caller().Msg("failed to write ref")
+			}
 		}
 	}
 
-	log.Info().Int("files", fileIdx).Int("batch", batchIdx).Caller().Msg("done")
+	log.Info().Caller().
+		Int("files processed", fileIdx).
+		Int("files sent", batchedFilesCnt).
+		Int("batch count", batchIdx).
+		Msg("done")
 }
 
 func writeRefs(ctx context.Context, bucket *storage.BucketHandle, docs []string) []error {
 	var errs []error
 	for _, d := range docs {
 		if _, err := writeRef(ctx, bucket, utils.GetFilenameFromPath(d), d); err != nil {
-			log.Printf("failed to write ref: %v", err)
-			// Handle individual errors
 			errs = append(errs, err)
 		}
 	}

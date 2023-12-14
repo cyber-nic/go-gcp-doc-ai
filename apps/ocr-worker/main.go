@@ -83,10 +83,16 @@ func main() {
 	}
 	defer store.Close()
 
+	// err bucket
+	errBucketHandle := store.Bucket(cfg.ErrBucketName)
+	if _, err := errBucketHandle.Attrs(ctx); err != nil {
+		log.Fatal().Err(err).Str("bucket", cfg.ErrBucketName).Caller().Msgf("failed to get bucket %s", cfg.ErrBucketName)
+	}
+
 	// ref bucket
 	refsBucketHandle := store.Bucket(cfg.RefsBucketName)
 	if _, err := refsBucketHandle.Attrs(ctx); err != nil {
-		log.Fatal().Err(err).Str("bucket", cfg.RefsBucketName).Caller().Msg("failed to get refs bucket")
+		log.Fatal().Err(err).Str("bucket", cfg.RefsBucketName).Caller().Msgf("failed to get bucket %s", cfg.RefsBucketName)
 	}
 
 	// main service
@@ -96,6 +102,7 @@ func main() {
 		AIClient:         ai,
 		AIProcessorName:  proc,
 		DstBucketName:    cfg.DstBucketName,
+		ErrBucketHandle:  errBucketHandle,
 		RefsBucketHandle: refsBucketHandle,
 	})
 	go func() {

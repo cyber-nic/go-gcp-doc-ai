@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
 
 	documentai "cloud.google.com/go/documentai/apiv1"
@@ -22,6 +23,7 @@ type SvcOptions struct {
 	AIClient         *documentai.DocumentProcessorClient
 	AIProcessorName  string
 	DstBucketName    string
+	ErrBucketHandle  *storage.BucketHandle
 	RefsBucketHandle *storage.BucketHandle
 }
 
@@ -41,6 +43,7 @@ type ocrWorkerSvc struct {
 	AIClient         *documentai.DocumentProcessorClient
 	AIProcessorName  string
 	DstBucketName    string
+	ErrBucketHandle  *storage.BucketHandle
 	RefsBucketHandle *storage.BucketHandle
 }
 
@@ -54,6 +57,7 @@ func NewOCRWorkerSvc(ctx context.Context, o *SvcOptions) OCRWorkerSvc {
 		AIClient:         o.AIClient,
 		AIProcessorName:  o.AIProcessorName,
 		DstBucketName:    o.DstBucketName,
+		ErrBucketHandle:  o.ErrBucketHandle,
 		RefsBucketHandle: o.RefsBucketHandle,
 	}
 }
@@ -73,7 +77,7 @@ func existsInRefsBucket(ctx context.Context, bucket *storage.BucketHandle, filen
 		return false, nil
 	}
 	if err != nil {
-		log.Error().Err(err).Msg("failed to check refs bucket")
+		log.Error().Err(err).Caller().Msg("failed to check refs bucket")
 	}
 
 	return true, nil
@@ -82,7 +86,6 @@ func existsInRefsBucket(ctx context.Context, bucket *storage.BucketHandle, filen
 // Start is the main business logic loop.
 func (svc *ocrWorkerSvc) Start() error {
 	svc.ready = true
-	log.Info().Msg("service started")
 
 	msgHandler := func(ctx context.Context, m *pubsub.Message) {
 		start := time.Now()
@@ -93,45 +96,67 @@ func (svc *ocrWorkerSvc) Start() error {
 			m.Nack()
 			return
 		}
-		log.Info().Int("files", len(filenames)).Caller().Msgf("received %d files", len(filenames))
 
-		// Acknowledge the message
+		// acknowledge message
 		m.Ack()
+		log.Info().Int("files", len(filenames)).Caller().Msgf("msg acknowledged. processing %d files", len(filenames))
 
+		// convert []string into []*documentaipb.GcsDocument
 		documents := formatDocs(ctx, svc.RefsBucketHandle, filenames)
+		// build *documentaipb.BatchProcessRequest
 		req := formatDocAIReq(svc.AIProcessorName, svc.DstBucketName, documents)
 
+		// perform batch OCR request
 		success, failures, err := submitDocAIBatch(ctx, svc.AIClient, req)
-		if err != nil {
-			log.Error().Err(err).Msg("catastrophic failure")
+		if err != nil && err.Error() != "rpc error: code = InvalidArgument desc = Failed to process all documents." {
+			log.Error().Err(err).Caller().Msgf("error submitting batch: %v", err)
 		}
 
-		// write refs to refs bucket
-		if errs := writeRefs(ctx, svc.RefsBucketHandle, success); len(errs) > 0 {
-			log.Printf("failed to write refs: %v", err)
+		// write success refs
+		if errs := writeKVRefs(ctx, svc.RefsBucketHandle, success); len(errs) > 0 {
+			for _, e := range errs {
+				log.Error().Err(e).Caller().Msg("failed to write success ref")
+			}
+		}
+
+		// write failure errs
+		if errs := writeKVRefs(ctx, svc.ErrBucketHandle, failures); len(errs) > 0 {
+			for _, e := range errs {
+				log.Error().Err(e).Caller().Msg("failed to write error")
+			}
 		}
 
 		// the OCR work rate will control the NLP rate, which is the rate limiting factor.
 		// the duration of this work must be >- 60 secs
 		elapsed := time.Since(start)
 
+		// sleep if the elapsed time is less than 63 seconds
 		if elapsed.Seconds() < 60 {
 			sleepDuration := 60 - elapsed.Seconds() + 3 // 5% buffer
 			time.Sleep(time.Duration(sleepDuration) * time.Second)
 		}
+		total := time.Since(start).Seconds()
 
-		log.Info().
+		// log the results as info or error if there are failures
+		l := func() *zerolog.Event {
+			if len(failures) > 0 {
+				return log.Error()
+			} else {
+				return log.Info()
+			}
+		}()
+		l.Caller().
 			Int("failures", len(failures)).
 			Int("success", len(success)).
 			Float64("ocr duration", elapsed.Seconds()).
-			Float64("total time", time.Since(start).Seconds()).
-			Msgf("%d/%d", len(success), len(filenames))
+			Float64("total time", total).
+			Msgf("processed %d/%d files in %f seconds", len(success), len(filenames), total)
 	}
 
 	// Main service loop.
 	for svc.ready {
 		if err := svc.Subscription.Receive(svc.Context, msgHandler); err != nil {
-			log.Print("msg", "failed to receive message", "error", err)
+			log.Error().Err(err).Caller().Msg("failed to receive message")
 		}
 	}
 
@@ -139,11 +164,11 @@ func (svc *ocrWorkerSvc) Start() error {
 	return nil
 }
 
-func writeRefs(ctx context.Context, bucket *storage.BucketHandle, docs []string) []error {
+func writeKVRefs(ctx context.Context, bucket *storage.BucketHandle, docs []KV) []error {
 	var errs []error
-	for _, d := range docs {
-		if _, err := writeRef(ctx, bucket, utils.GetFilenameFromPath(d), d); err != nil {
-			log.Printf("failed to write ref: %v", err)
+	for _, kv := range docs {
+		if _, err := writeRef(ctx, bucket, kv.Key, kv.Value); err != nil {
+			log.Error().Err(err).Caller().Msg("failed to write ref")
 			// Handle individual errors
 			errs = append(errs, err)
 		}
@@ -173,7 +198,7 @@ func formatDocs(ctx context.Context, b *storage.BucketHandle, filenames []string
 
 	for _, f := range filenames {
 		// check if file exists in refs bucket
-		if ok, err := existsInRefsBucket(ctx, b, f); err != nil || ok {
+		if ok, err := existsInRefsBucket(ctx, b, utils.GetFilenameFromPath(f)); err != nil || ok {
 			// todo: if err write to src-err
 			continue
 		}
@@ -191,9 +216,18 @@ func formatDocs(ctx context.Context, b *storage.BucketHandle, filenames []string
 	return documents
 }
 
-func submitDocAIBatch(ctx context.Context, client *documentai.DocumentProcessorClient, req *documentaipb.BatchProcessRequest) ([]string, []string, error) {
-	var success []string
-	var failures []string
+type KV struct {
+	Key   string
+	Value string
+}
+
+func submitDocAIBatch(
+	ctx context.Context,
+	client *documentai.DocumentProcessorClient,
+	req *documentaipb.BatchProcessRequest,
+) ([]KV, []KV, error) {
+	var success []KV
+	var failures []KV
 
 	// process request
 	op, err := client.BatchProcessDocuments(ctx, req)
@@ -210,18 +244,18 @@ func submitDocAIBatch(ctx context.Context, client *documentai.DocumentProcessorC
 		return success, failures, fmt.Errorf("meta: %w", metaErr)
 	}
 
-	// log the metadata
-	// log.Info().Msg("BatchProcessDocuments", op.Name(), meta.State, meta.UpdateTime)
-
 	// https://github.com/googleapis/googleapis/blob/master/google/rpc/code.proto
 	// log individual process status
 	for _, i := range meta.IndividualProcessStatuses {
 		if i.Status.Code == 0 {
-			success = append(success, i.InputGcsSource)
+			success = append(success, KV{ Key: i.InputGcsSource, Value: ""})
 		} else {
-			failures = append(failures, i.InputGcsSource)
-			log.Error().Err(errors.New(i.Status.Message)).Int32("StatusCode", i.Status.Code).Str("file", i.InputGcsSource).Msgf("failed to process %s", i.InputGcsSource)
-
+			failures = append(failures, KV{ Key: i.InputGcsSource, Value: i.Status.Message})
+			// log
+			log.Error().Err(errors.New(i.Status.Message)).Caller().
+				Int32("StatusCode", i.Status.Code).
+				Str("file", i.InputGcsSource).
+				Msgf("failed to process %s", i.InputGcsSource)
 		}
 	}
 
@@ -232,15 +266,15 @@ func submitDocAIBatch(ctx context.Context, client *documentai.DocumentProcessorC
 	return success, failures, nil
 }
 
-func formatDocAIReq(processorName string, target string, documents []*documentaipb.GcsDocument) *documentaipb.BatchProcessRequest {
+func formatDocAIReq(proc string, target string, docs []*documentaipb.GcsDocument) *documentaipb.BatchProcessRequest {
 	// https://pkg.go.dev/cloud.google.com/go/documentai/apiv1/documentaipb#ProcessRequest
 	return &documentaipb.BatchProcessRequest{
-		Name:            processorName,
+		Name:            proc,
 		SkipHumanReview: true,
 		InputDocuments: &documentaipb.BatchDocumentsInputConfig{
 			Source: &documentaipb.BatchDocumentsInputConfig_GcsDocuments{
 				GcsDocuments: &documentaipb.GcsDocuments{
-					Documents: documents,
+					Documents: docs,
 				},
 			},
 		},
