@@ -3,9 +3,10 @@ module github.com/cyber-nic/go-gcp-doc-ai/apps/ocr-worker
 go 1.21.4
 
 require (
-	cloud.google.com/go/documentai v1.23.6
+	cloud.google.com/go/documentai v1.23.7
 	cloud.google.com/go/pubsub v1.33.0
-	cloud.google.com/go/storage v1.30.1
+	cloud.google.com/go/storage v1.36.0
+	github.com/rs/zerolog v1.31.0
 	google.golang.org/api v0.153.0
 )
 
@@ -23,7 +24,6 @@ require (
 	github.com/googleapis/gax-go/v2 v2.12.0 // indirect
 	github.com/mattn/go-colorable v0.1.13 // indirect
 	github.com/mattn/go-isatty v0.0.19 // indirect
-	github.com/rs/zerolog v1.31.0 // indirect
 	go.opencensus.io v0.24.0 // indirect
 	golang.org/x/crypto v0.15.0 // indirect
 	golang.org/x/net v0.18.0 // indirect

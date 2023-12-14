@@ -19,13 +19,14 @@ import (
 
 // SvcOptions is the representation of the options availble to the OCRWorkerSvc service
 type SvcOptions struct {
-	Topic            *pubsub.Topic
-	Subscription     *pubsub.Subscription
-	AIClient         *documentai.DocumentProcessorClient
-	AIProcessorName  string
-	DstBucketName    string
-	ErrBucketHandle  *storage.BucketHandle
-	RefsBucketHandle *storage.BucketHandle
+	Topic                   *pubsub.Topic
+	Subscription            *pubsub.Subscription
+	AIClient                *documentai.DocumentProcessorClient
+	AIProcessorName         string
+	DstBucketName           string
+	ErrBucketHandle         *storage.BucketHandle
+	RefsBucketHandle        *storage.BucketHandle
+	DocAIMinAsyncReqSeconds int
 }
 
 // OCRWorkerSvc is the interface for the ocrWorkerSvc service.
@@ -37,29 +38,31 @@ type OCRWorkerSvc interface {
 
 // ocrWorkerSvc is a service that will submit a batch of documents to the Document AI API.
 type ocrWorkerSvc struct {
-	ready            bool
-	Context          context.Context
-	Topic            *pubsub.Topic
-	Subscription     *pubsub.Subscription
-	AIClient         *documentai.DocumentProcessorClient
-	AIProcessorName  string
-	DstBucketName    string
-	ErrBucketHandle  *storage.BucketHandle
-	RefsBucketHandle *storage.BucketHandle
+	ready                   bool
+	Context                 context.Context
+	Topic                   *pubsub.Topic
+	Subscription            *pubsub.Subscription
+	AIClient                *documentai.DocumentProcessorClient
+	AIProcessorName         string
+	DstBucketName           string
+	ErrBucketHandle         *storage.BucketHandle
+	RefsBucketHandle        *storage.BucketHandle
+	DocAIMinAsyncReqSeconds float64
 }
 
 // NewOCRWorkerSvc creates an instance of the OCRWorkerSvc Service.
 func NewOCRWorkerSvc(ctx context.Context, o *SvcOptions) OCRWorkerSvc {
 	return &ocrWorkerSvc{
-		ready:            false,
-		Context:          ctx,
-		Topic:            o.Topic,
-		Subscription:     o.Subscription,
-		AIClient:         o.AIClient,
-		AIProcessorName:  o.AIProcessorName,
-		DstBucketName:    o.DstBucketName,
-		ErrBucketHandle:  o.ErrBucketHandle,
-		RefsBucketHandle: o.RefsBucketHandle,
+		ready:                   false,
+		Context:                 ctx,
+		Topic:                   o.Topic,
+		Subscription:            o.Subscription,
+		AIClient:                o.AIClient,
+		AIProcessorName:         o.AIProcessorName,
+		DstBucketName:           o.DstBucketName,
+		ErrBucketHandle:         o.ErrBucketHandle,
+		RefsBucketHandle:        o.RefsBucketHandle,
+		DocAIMinAsyncReqSeconds: float64(o.DocAIMinAsyncReqSeconds),
 	}
 }
 
@@ -128,12 +131,11 @@ func (svc *ocrWorkerSvc) Start() error {
 		}
 
 		// the OCR work rate will control the NLP rate, which is the rate limiting factor.
-		// the duration of this work must be >- 60 secs
 		elapsed := time.Since(start)
 
-		// sleep if the elapsed time is less than 63 seconds
-		if elapsed.Seconds() < 60 {
-			sleepDuration := 60 - elapsed.Seconds() + 3 // 5% buffer
+		// sleep if the elapsed time is less than x seconds
+		if elapsed.Seconds() < svc.DocAIMinAsyncReqSeconds {
+			sleepDuration := svc.DocAIMinAsyncReqSeconds - elapsed.Seconds()
 			time.Sleep(time.Duration(sleepDuration) * time.Second)
 		}
 		total := time.Since(start).Seconds()
@@ -250,9 +252,9 @@ func submitDocAIBatch(
 	for _, i := range meta.IndividualProcessStatuses {
 		filename := strings.Replace(i.InputGcsSource, "gs://", "", 1)
 		if i.Status.Code == 0 {
-			success = append(success, KV{ Key: filename, Value: ""})
+			success = append(success, KV{Key: filename, Value: ""})
 		} else {
-			failures = append(failures, KV{ Key: fmt.Sprintf("%s.log", filename), Value: i.Status.Message})
+			failures = append(failures, KV{Key: fmt.Sprintf("%s.log", filename), Value: i.Status.Message})
 			// log
 			log.Error().Err(errors.New(i.Status.Message)).Caller().
 				Int32("StatusCode", i.Status.Code).

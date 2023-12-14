@@ -26,14 +26,14 @@ func main() {
 	cfg := getConfig()
 
 	// create storage client
-	s, err := storage.NewClient(ctx)
+	store, err := storage.NewClient(ctx)
 	if err != nil {
 		log.Fatal().Err(err).Caller().Msg("failed to create storage client")
 	}
-	defer s.Close()
+	defer store.Close()
 
 	// ref bucket
-	refsBucket := s.Bucket(cfg.RefsBucketName)
+	refsBucket := store.Bucket(cfg.RefsBucketName)
 	if _, err := refsBucket.Attrs(ctx); err != nil {
 		log.Fatal().Err(err).Caller().Msg("failed to get refs bucket")
 	}
@@ -54,7 +54,7 @@ func main() {
 	defer topic.Stop()
 
 	// checkpoint
-	checkpointBucket := s.Bucket(cfg.CheckpointBucketName)
+	checkpointBucket := store.Bucket(cfg.CheckpointBucketName)
 	if _, err := checkpointBucket.Attrs(ctx); err != nil {
 		log.Fatal().Err(err).Caller().Msg("failed to get checkpoint bucket")
 	}

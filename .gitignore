@@ -8,3 +8,4 @@ local.env
 iac/provider.local.tf
 
 app
+test-local.sh

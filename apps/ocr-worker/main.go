@@ -97,13 +97,14 @@ func main() {
 
 	// main service
 	svc := NewOCRWorkerSvc(ctx, &SvcOptions{
-		Topic:            t,
-		Subscription:     s,
-		AIClient:         ai,
-		AIProcessorName:  proc,
-		DstBucketName:    cfg.DstBucketName,
-		ErrBucketHandle:  errBucketHandle,
-		RefsBucketHandle: refsBucketHandle,
+		Topic:                   t,
+		Subscription:            s,
+		AIClient:                ai,
+		AIProcessorName:         proc,
+		DstBucketName:           cfg.DstBucketName,
+		ErrBucketHandle:         errBucketHandle,
+		RefsBucketHandle:        refsBucketHandle,
+		DocAIMinAsyncReqSeconds: cfg.DocAIMinAsyncReqSeconds,
 	})
 	go func() {
 		done <- svc.Start()
@@ -152,17 +153,17 @@ func startWebServer(svc OCRWorkerSvc, exit chan error, p string) {
 }
 
 type appConfig struct {
-	Debug                  bool
-	Port                   string
-	ProjectID              string
-	DocAIProcessorID       string
-	DocAIProcessorLocation string
-	DstBucketName          string
-	ErrBucketName          string
-	RefsBucketName         string
-	PubsubTopicID          string
-	PubsubSubscriptionID   string
-	DocAIMaxReqPerMinute   int
+	Debug                   bool
+	Port                    string
+	ProjectID               string
+	DocAIProcessorID        string
+	DocAIProcessorLocation  string
+	DstBucketName           string
+	ErrBucketName           string
+	RefsBucketName          string
+	PubsubTopicID           string
+	PubsubSubscriptionID    string
+	DocAIMinAsyncReqSeconds int
 }
 
 func getMandatoryEnvVar(n string) string {
@@ -195,19 +196,21 @@ func getConfig() appConfig {
 	docAIProcessorLocation := getMandatoryEnvVar("DOC_AI_PROCESSOR_LOCATION")
 	// maxDocAIReqPerMinute allows for the controler of the number of doc ai requests per minute
 	// to avoid exceeding the quota of downstream services such as NLP.
-	docAIMaxReqPerMinute := utils.GetIntEnvVar("DOC_AI_MAX_REQ_PER_MIN", 1)
+	// the OCR work rate will control the NLP rate, which is the rate limiting factor.
+	// the duration of this work must be >- 60 secs
+	DocAIMinAsyncReqSeconds := utils.GetIntEnvVar("DOC_AI_MIN_REQ_SECONDS", 60)
 
 	return appConfig{
-		Debug:                  debug,
-		Port:                   port,
-		ProjectID:              projectID,
-		DstBucketName:          dstBucketName,
-		RefsBucketName:         refsBucketName,
-		ErrBucketName:          errBucketName,
-		PubsubTopicID:          pubsubTopicID,
-		PubsubSubscriptionID:   pubsubSubID,
-		DocAIMaxReqPerMinute:   docAIMaxReqPerMinute,
-		DocAIProcessorID:       docAIProcessorID,
-		DocAIProcessorLocation: docAIProcessorLocation,
+		Debug:                   debug,
+		Port:                    port,
+		ProjectID:               projectID,
+		DstBucketName:           dstBucketName,
+		RefsBucketName:          refsBucketName,
+		ErrBucketName:           errBucketName,
+		PubsubTopicID:           pubsubTopicID,
+		PubsubSubscriptionID:    pubsubSubID,
+		DocAIMinAsyncReqSeconds: DocAIMinAsyncReqSeconds,
+		DocAIProcessorID:        docAIProcessorID,
+		DocAIProcessorLocation:  docAIProcessorLocation,
 	}
 }

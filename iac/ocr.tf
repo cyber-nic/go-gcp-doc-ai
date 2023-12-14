@@ -155,6 +155,10 @@ resource "google_cloud_run_service" "ocr" {
           name  = "DOC_AI_PROCESSOR_LOCATION"
           value = var.ocr_doc_ai_processor_location
         }
+        env {
+          name  = "DOC_AI_MIN_REQ_SECONDS"
+          value = var.ocr_doc_ai_min_req_seconds
+        }
 
       }
 

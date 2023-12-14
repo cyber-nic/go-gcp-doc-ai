@@ -21,6 +21,11 @@ variable "ocr_max_instances" {
   default = 5
 }
 
+variable "ocr_doc_ai_min_req_seconds" {
+  type    = number
+  default = 60
+}
+
 variable "ocr_debug" {
   type    = bool
   default = false
