@@ -104,70 +104,66 @@ resource "google_storage_bucket_iam_member" "ocr_refs_attrs" {
 
 
 # cloud run
-resource "google_cloud_run_service" "ocr" {
+resource "google_cloud_run_v2_service" "ocr" {
   name     = "ocr"
   location = local.region
 
   template {
-    metadata {
-      annotations = {
-        "autoscaling.knative.dev/minScale" = var.ocr_min_instances
-        "autoscaling.knative.dev/maxScale" = var.ocr_max_instances
-      }
+    scaling {
+      min_instance_count = var.ocr_min_instances
+      max_instance_count = var.ocr_max_instances
     }
-    spec {
-      service_account_name = google_service_account.ocr.email
-      containers {
-        image = "${local.region}-docker.pkg.dev/${var.project_id}/${google_artifact_registry_repository.ocr.name}/app:${var.ocr_build_version}"
-        ports {
-          container_port = 5000
-        }
 
-        env {
-          name  = "GCP_PROJECT_ID"
-          value = var.project_id
-        }
-        env {
-          name  = "PUBSUB_TOPIC_ID"
-          value = var.ocr_pubsub_topic_id
-        }
-        env {
-          name  = "PUBSUB_SUBSCRIPTION_ID"
-          value = var.ocr_pubsub_subscription_id
-        }
-        env {
-          name  = "DST_BUCKET_NAME"
-          value = var.ocr_dst_bucket_name
-        }
-        env {
-          name  = "REFS_BUCKET_NAME"
-          value = var.ocr_refs_bucket_name
-        }
-        env {
-          name  = "ERR_BUCKET_NAME"
-          value = var.ocr_err_bucket_name
-        }
-        env {
-          name  = "DOC_AI_PROCESSOR_ID"
-          value = var.ocr_doc_ai_processor_id
-        }
-        env {
-          name  = "DOC_AI_PROCESSOR_LOCATION"
-          value = var.ocr_doc_ai_processor_location
-        }
-        env {
-          name  = "DOC_AI_MIN_REQ_SECONDS"
-          value = var.ocr_doc_ai_min_req_seconds
-        }
+    service_account = google_service_account.ocr.email
 
+    containers {
+      image = "${local.region}-docker.pkg.dev/${var.project_id}/${google_artifact_registry_repository.ocr.name}/app:${var.ocr_build_version}"
+      ports {
+        container_port = 5000
       }
 
+      env {
+        name  = "GCP_PROJECT_ID"
+        value = var.project_id
+      }
+      env {
+        name  = "PUBSUB_TOPIC_ID"
+        value = var.ocr_pubsub_topic_id
+      }
+      env {
+        name  = "PUBSUB_SUBSCRIPTION_ID"
+        value = var.ocr_pubsub_subscription_id
+      }
+      env {
+        name  = "DST_BUCKET_NAME"
+        value = var.ocr_dst_bucket_name
+      }
+      env {
+        name  = "REFS_BUCKET_NAME"
+        value = var.ocr_refs_bucket_name
+      }
+      env {
+        name  = "ERR_BUCKET_NAME"
+        value = var.ocr_err_bucket_name
+      }
+      env {
+        name  = "DOC_AI_PROCESSOR_ID"
+        value = var.ocr_doc_ai_processor_id
+      }
+      env {
+        name  = "DOC_AI_PROCESSOR_LOCATION"
+        value = var.ocr_doc_ai_processor_location
+      }
+      env {
+        name  = "DOC_AI_MIN_REQ_SECONDS"
+        value = var.ocr_doc_ai_min_req_seconds
+      }
     }
   }
 
   traffic {
-    percent         = 100
-    latest_revision = true
+    percent = 100
+    type    = "TRAFFIC_TARGET_ALLOCATION_TYPE_LATEST"
   }
 }
 

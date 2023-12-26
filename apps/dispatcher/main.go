@@ -85,6 +85,7 @@ func main() {
 	// Iterate through all objects in the firestore collection
 Batch:
 	for {
+		// fmt.Println(batchIdx, fileIdx, "batch")
 		snaps, err := query.Documents(ctx).GetAll()
 		if err != nil {
 			break Batch
@@ -99,6 +100,8 @@ Batch:
 		// process batch
 	Snap:
 		for _, snap := range snaps {
+			// fmt.Println(batchIdx, fileIdx, "snap", snap.Ref.ID)
+
 			fileIdx++
 
 			// Check if file was already processed
@@ -277,12 +280,11 @@ func publishFilenameBatch(ctx context.Context, t *pubsub.Topic, f []string) (str
 }
 
 func getMandatoryEnvVar(n string) string {
-	v := os.Getenv(n)
-	if v != "" {
-		return v
+	v, ok := os.LookupEnv(n)
+	if !ok || v == "" {
+		log.Fatal().Err(errors.New("missing env var")).Caller().Msgf("env var %s required", n)
 	}
-	log.Fatal().Err(errors.New("missing env var")).Caller().Msgf("env var %s required", n)
-	return ""
+	return v
 }
 
 type appConfig struct {

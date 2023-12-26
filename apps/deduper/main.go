@@ -282,10 +282,9 @@ func computeHash(hasher hash.Hash, r *bytes.Reader) string {
 }
 
 func getMandatoryEnvVar(n string) string {
-	v := os.Getenv(n)
-	if v != "" {
-		return v
+	v, ok := os.LookupEnv(n)
+	if !ok || v == "" {
+		log.Printf("env var %s required", n)
 	}
-	log.Fatalf("%s required", n)
-	return ""
+	return v
 }

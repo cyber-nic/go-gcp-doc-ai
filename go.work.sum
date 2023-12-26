@@ -55,6 +55,7 @@ cloud.google.com/go/iam v1.1.1/go.mod h1:A5avdyVL2tCppe4unb0951eI9jreack+RJ0/d+K
 cloud.google.com/go/iap v1.9.3/go.mod h1:DTdutSZBqkkOm2HEOTBzhZxh2mwwxshfD/h3yofAiCw=
 cloud.google.com/go/ids v1.4.4/go.mod h1:z+WUc2eEl6S/1aZWzwtVNWoSZslgzPxAboS0lZX0HjI=
 cloud.google.com/go/iot v1.7.4/go.mod h1:3TWqDVvsddYBG++nHSZmluoCAVGr1hAcabbWZNKEZLk=
+cloud.google.com/go/language v1.12.2 h1:zg9uq2yS9PGIOdc0Kz/l+zMtOlxKWonZjjo5w5YPG2A=
 cloud.google.com/go/language v1.12.2/go.mod h1:9idWapzr/JKXBBQ4lWqVX/hcadxB194ry20m/bTrhWc=
 cloud.google.com/go/lifesciences v0.9.4/go.mod h1:bhm64duKhMi7s9jR9WYJYvjAFJwRqNj+Nia7hF0Z7JA=
 cloud.google.com/go/logging v1.8.1/go.mod h1:TJjR+SimHwuC8MZ9cjByQulAMgni+RkXeI3wwctHJEI=

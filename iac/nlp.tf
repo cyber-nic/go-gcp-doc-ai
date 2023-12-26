@@ -1,4 +1,5 @@
 # https://registry.terraform.io/providers/hashicorp/google/latest/docs/data-sources/storage_project_service_account
+# allow eventarc to publish events and invoke function
 data "google_storage_project_service_account" "gcs_account" {
 }
 

@@ -3,6 +3,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"os"
@@ -167,12 +168,11 @@ type appConfig struct {
 }
 
 func getMandatoryEnvVar(n string) string {
-	v := os.Getenv(n)
-	if v != "" {
-		return v
+	v, ok := os.LookupEnv(n)
+	if !ok || v == "" {
+		log.Fatal().Err(errors.New("missing env var")).Caller().Msgf("env var %s required", n)
 	}
-	log.Fatal().Caller().Msgf("%s required", n)
-	return ""
+	return v
 }
 
 func getConfig() appConfig {
