@@ -1,5 +1,5 @@
 build:
-	go build -o ./bin/app ./src
+	go build -o ./bin/app ./
 
 test:
 	go test -v ./...

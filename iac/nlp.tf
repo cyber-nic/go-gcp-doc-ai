@@ -29,7 +29,14 @@ resource "google_storage_bucket_iam_member" "nlp_data_viewer" {
   member = "serviceAccount:${google_service_account.nlp.email}"
 }
 
-resource "google_storage_bucket_iam_member" "nlp_err_editor" {
+resource "google_storage_bucket_iam_member" "nlp_data_writer" {
+  // ocr_data is the nlp input
+  bucket = google_storage_bucket.nlp_data.name
+  role   = "roles/storage.objectUser"
+  member = "serviceAccount:${google_service_account.nlp.email}"
+}
+
+resource "google_storage_bucket_iam_member" "nlp_err_writer" {
   // ocr_data is the nlp input
   bucket = google_storage_bucket.nlp_err.name
   role   = "roles/storage.objectUser"
@@ -97,19 +104,21 @@ resource "google_cloudfunctions2_function" "nlp" {
   }
 
   service_config {
-    available_memory = "256M"
-    timeout_seconds  = 120
-    environment_variables = {
-      DEBUG                 = var.nlp_debug
-      GCP_PROJECT_ID        = var.project_id
-      FIRESTORE_DATABASE_ID = var.project_id
-      ERR_BUCKET_NAME       = google_storage_bucket.nlp_err.name
-      DST_BUCKET_PREFIX     = google_storage_bucket.nlp_data.name
-    }
-    ingress_settings = "ALLOW_INTERNAL_ONLY"
-    # ingress_settings               = "ALLOW_ALL"
+    available_memory   = "256M"
+    timeout_seconds    = 120
+    min_instance_count = 0
+    max_instance_count = 500
+
     all_traffic_on_latest_revision = true
+    ingress_settings               = "ALLOW_INTERNAL_ONLY"
     service_account_email          = google_service_account.nlp.email
+
+    environment_variables = {
+      DEBUG           = var.nlp_debug
+      GCP_PROJECT_ID  = var.project_id
+      ERR_BUCKET_NAME = google_storage_bucket.nlp_err.name
+      DST_BUCKET_NAME = google_storage_bucket.nlp_data.name
+    }
   }
 
   event_trigger {
@@ -117,6 +126,7 @@ resource "google_cloudfunctions2_function" "nlp" {
     event_type            = "google.cloud.storage.object.v1.finalized"
     retry_policy          = "RETRY_POLICY_RETRY"
     service_account_email = google_service_account.nlp.email
+
     event_filters {
       attribute = "bucket"
       value     = google_storage_bucket.ocr_data.name
