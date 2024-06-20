@@ -46,6 +46,12 @@ resource "google_project_service" "pubsub" {
   service = "pubsub.googleapis.com"
 }
 
+// vision
+resource "google_project_service" "vision" {
+  project = var.project_id
+  service = "vision.googleapis.com"
+}
+
 // documentai
 resource "google_project_service" "documentai" {
   project = var.project_id

@@ -95,6 +95,7 @@ resource "google_cloudfunctions2_function" "nlp" {
   build_config {
     runtime     = "go121"
     entry_point = "Handler"
+    docker_repository = "projects/${var.project_id}/locations/${local.region}/repositories/gcf-artifacts"
     source {
       storage_source {
         bucket = google_storage_bucket.nlp_deploy.name
