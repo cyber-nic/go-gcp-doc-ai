@@ -1,8 +1,0 @@
-go 1.21.4
-
-use (
-	./apps/deduper
-	./apps/dispatcher
-	./apps/nlp-worker
-	./apps/ocr-worker
-)
