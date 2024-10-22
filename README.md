@@ -36,10 +36,18 @@ https://cloud.google.com/functions/docs/running/functions-emulator#cloudevent-fu
 #### batch 100
 
 - Files per batch processing request: 100
-- OCR per 30s: 5\*100=500
+- OCR per 30s: 5*100=500
 - Expected completed OCR per 30s, 1min, 1hour, 1day: `5*100=500`, `1000`, `60k`, `1.44M`
 - Expected duration to process 2.5M pages: 42h
 
 ### Natural Language
 
 - https://cloud.google.com/natural-language/quotas
+
+
+# Rate limiting
+1. avg image sanitizing duration: 350ms
+2. number of sanitized images per second, rounded down: 8
+3. number of sanitized images per minute with 8 concurrent workers: 64
+4. avg async ocr duration: 30 secs
+5. Image Vision Text detection requests per minute: 1800

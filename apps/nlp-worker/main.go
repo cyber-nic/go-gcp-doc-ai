@@ -6,23 +6,56 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"log"
 	"os"
+	"strconv"
 	"time"
 
-	"cloud.google.com/go/documentai/apiv1/documentaipb"
+	"github.com/rs/zerolog/log"
+
 	language "cloud.google.com/go/language/apiv1"
 	"cloud.google.com/go/language/apiv1/languagepb"
 	"cloud.google.com/go/storage"
+	"cloud.google.com/go/vision/v2/apiv1/visionpb"
 
 	"github.com/GoogleCloudPlatform/functions-framework-go/functions"
 	"github.com/cloudevents/sdk-go/v2/event"
-	"github.com/cyber-nic/go-gcp-doc-ai/apps/nlp-worker/libs/utils"
 	"github.com/googleapis/google-cloudevents-go/cloud/storagedata"
 	"google.golang.org/protobuf/encoding/protojson"
 )
 
+type appConfig struct {
+	Debug         bool
+	ProjectID     string
+	DstBucketName string
+	ErrBucketName string
+}
+
+var (
+	cfg   appConfig
+	nlp   *language.Client
+	store *storage.Client
+)
+
 func init() {
+	// app config
+	cfg = getConfig()
+
+	// clients
+	var err error
+
+	// create language client
+	nlp, err = language.NewClient(context.Background())
+	if err != nil {
+		log.Fatal().Msgf("failed to create language client: %v", err)
+	}
+
+	// create storage client
+	store, err = storage.NewClient(context.Background())
+	if err != nil {
+		log.Fatal().Msgf("failed to create storage client: %v", err)
+	}
+
+	// register handler
 	functions.CloudEvent("Handler", handler)
 }
 
@@ -32,28 +65,11 @@ func handler(ctx context.Context, e event.Event) error {
 		return fmt.Errorf("unsupported event type: %s", e.Type())
 	}
 
-	// app config
-	cfg := getConfig()
-
 	// unmarshal event data
 	var data storagedata.StorageObjectData
 	if err := protojson.Unmarshal(e.Data(), &data); err != nil {
 		return fmt.Errorf("protojson.Unmarshal: %w", err)
 	}
-
-	// create language client
-	nlp, err := language.NewClient(ctx)
-	if err != nil {
-		return fmt.Errorf("failed to create language client: %w", err)
-	}
-	defer nlp.Close()
-
-	// create storage client
-	store, err := storage.NewClient(ctx)
-	if err != nil {
-		return fmt.Errorf("failed to create storage client: %w", err)
-	}
-	defer store.Close()
 
 	// err bucket
 	errBucket := store.Bucket(cfg.ErrBucketName)
@@ -64,6 +80,8 @@ func handler(ctx context.Context, e event.Event) error {
 	// src filename
 	f := data.GetName()
 
+	defer log.Info().Str("src_bucket", data.GetBucket()).Str("dst", cfg.DstBucketName).Msg(data.GetName())
+
 	// get src object handle
 	reader, err := store.Bucket(s).Object(f).NewReader(ctx)
 	if err != nil {
@@ -71,6 +89,7 @@ func handler(ctx context.Context, e event.Event) error {
 		writeErrorResponseToBucketFile(ctx, errBucket, f, m, err)
 		return fmt.Errorf("%s: %w", m, err)
 	}
+
 	defer reader.Close()
 
 	// read object into a byte slice
@@ -82,7 +101,7 @@ func handler(ctx context.Context, e event.Event) error {
 	}
 
 	// unmarshal protojson to gcp ocr output type
-	var doc documentaipb.Document
+	var doc visionpb.BatchAnnotateImagesResponse
 	err = protojson.Unmarshal(jso, &doc)
 	if err != nil {
 		m := fmt.Sprintf("failed to parse document JSON (%s/%s)", s, f)
@@ -90,57 +109,59 @@ func handler(ctx context.Context, e event.Event) error {
 		return fmt.Errorf("%s: %w", m, err)
 	}
 
-	// create nlp request
-	req := &languagepb.AnalyzeEntitiesRequest{
-		Document: &languagepb.Document{
-			// https://pkg.go.dev/cloud.google.com/go/language/apiv1/languagepb#Document_Type
-			Type: languagepb.Document_PLAIN_TEXT,
-			Source: &languagepb.Document_Content{
-				Content: doc.Text,
+	for _, r := range doc.Responses {
+
+		if r.Error != nil {
+			m := fmt.Sprintf("failed to process ocr response (%s/%s)", s, f)
+			writeErrorResponseToBucketFile(ctx, errBucket, f, m, fmt.Errorf("%s: %s", m, r.Error.Message))
+			continue
+		}
+
+		// create nlp request
+		req := &languagepb.AnalyzeEntitiesRequest{
+			Document: &languagepb.Document{
+				// https://pkg.go.dev/cloud.google.com/go/language/apiv1/languagepb#Document_Type
+				Type: languagepb.Document_PLAIN_TEXT,
+				Source: &languagepb.Document_Content{
+					Content: r.FullTextAnnotation.Text,
+				},
+				// select most likely language from OCR output
+				Language: r.FullTextAnnotation.Pages[0].Property.DetectedLanguages[0].LanguageCode,
 			},
-			// select most likely language from OCR output
-			Language: doc.Pages[0].DetectedLanguages[0].LanguageCode,
-		},
-	}
+		}
 
-	// perform nlp entities analysis
-	resp, err := nlp.AnalyzeEntities(ctx, req)
-	if err != nil {
-		m := fmt.Sprintf("failed to analyze nlp entities (%s/%s)", s, f)
-		writeErrorResponseToBucketFile(ctx, errBucket, f, m, err)
-		return fmt.Errorf("%s: %w", m, err)
-	}
+		// perform nlp entities analysis
+		resp, err := nlp.AnalyzeEntities(ctx, req)
+		if err != nil {
+			m := fmt.Sprintf("failed to analyze nlp entities (%s/%s)", s, f)
+			writeErrorResponseToBucketFile(ctx, errBucket, f, m, err)
+			return fmt.Errorf("%s: %w", m, err)
+		}
 
-	// write response to file
-	wc := store.Bucket(cfg.DstBucketName).Object(f).NewWriter(ctx)
-	wc.ContentType = "application/json"
+		// write response to file
+		wc := store.Bucket(cfg.DstBucketName).Object(f).NewWriter(ctx)
+		wc.ContentType = "application/json"
 
-	// marshal struct to JSON directly into the writer
-	encoder := json.NewEncoder(wc)
-	if err := encoder.Encode(resp); err != nil {
-		m := fmt.Sprintf("failed to json encode nlp resp (%s/%s)", cfg.DstBucketName, f)
-		writeErrorResponseToBucketFile(ctx, errBucket, f, m, err)
-		return fmt.Errorf("%s: %w", m, err)
-	}
+		// marshal struct to JSON directly into the writer
+		encoder := json.NewEncoder(wc)
+		if err := encoder.Encode(resp); err != nil {
+			m := fmt.Sprintf("failed to json encode nlp resp (%s/%s)", cfg.DstBucketName, f)
+			writeErrorResponseToBucketFile(ctx, errBucket, f, m, err)
+			return fmt.Errorf("%s: %w", m, err)
+		}
 
-	if err := wc.Close(); err != nil {
-		m := fmt.Sprintf("failed to close json writer (%s/%s)", cfg.DstBucketName, f)
-		writeErrorResponseToBucketFile(ctx, errBucket, f, m, err)
-		return fmt.Errorf("%s: %w", m, err)
+		if err := wc.Close(); err != nil {
+			m := fmt.Sprintf("failed to close json writer (%s/%s)", cfg.DstBucketName, f)
+			writeErrorResponseToBucketFile(ctx, errBucket, f, m, err)
+			return fmt.Errorf("%s: %w", m, err)
+		}
 	}
 
 	return nil
 }
 
-type appConfig struct {
-	Debug         bool
-	ProjectID     string
-	DstBucketName string
-	ErrBucketName string
-}
-
 func getConfig() appConfig {
-	debug := utils.GetBoolEnvVar("DEBUG", false)
+	debug := GetBoolEnvVar("DEBUG", false)
 
 	// gcp
 	projectID := getMandatoryEnvVar("GCP_PROJECT_ID")
@@ -160,7 +181,7 @@ func getConfig() appConfig {
 func getMandatoryEnvVar(n string) string {
 	v, ok := os.LookupEnv(n)
 	if !ok || v == "" {
-		log.Fatalf("env var %s required", n)
+		log.Fatal().Msgf("env var %s required", n)
 	}
 	return v
 }
@@ -181,6 +202,12 @@ func writeErrorResponseToBucketFile(ctx context.Context, b *storage.BucketHandle
 	}
 
 	wc := b.Object(fileName).NewWriter(ctx)
+	defer func() {
+		if cerr := wc.Close(); cerr != nil && err == nil {
+			err = cerr
+		}
+	}()
+
 	wc.ContentType = "application/json"
 
 	encoder := json.NewEncoder(wc)
@@ -188,9 +215,23 @@ func writeErrorResponseToBucketFile(ctx context.Context, b *storage.BucketHandle
 		return err
 	}
 
-	if err := wc.Close(); err != nil {
-		return err
-	}
-
 	return nil
+}
+
+// GetStrEnvVar returns a string from an environment variable
+func GetStrEnvVar(key, fallback string) string {
+	if value, ok := os.LookupEnv(key); ok {
+		return value
+	}
+	return fallback
+}
+
+// GetBoolEnvVar returns a bool from an environment variable
+func GetBoolEnvVar(key string, fallback bool) bool {
+	val := GetStrEnvVar(key, strconv.FormatBool(fallback))
+	ret, err := strconv.ParseBool(val)
+	if err != nil {
+		return fallback
+	}
+	return ret
 }

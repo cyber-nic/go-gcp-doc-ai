@@ -4,8 +4,10 @@ terraform.tfvars
 bin/*
 examples/
 local.env
-
-iac/provider.local.tf
+.env
+iac/state-local.tf
 
 app
 test-local.sh
+
+*.gexf

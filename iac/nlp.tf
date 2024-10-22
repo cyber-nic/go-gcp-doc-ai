@@ -1,20 +1,3 @@
-# https://registry.terraform.io/providers/hashicorp/google/latest/docs/data-sources/storage_project_service_account
-# allow eventarc to publish events and invoke function
-data "google_storage_project_service_account" "gcs_account" {
-}
-
-output "google_storage_project_service_account" {
-  value = data.google_storage_project_service_account.gcs_account.email_address
-}
-
-# https://cloud.google.com/storage/docs/reporting-changes#terraform
-
-resource "google_project_iam_member" "ocr_bucket_events" {
-  project = var.project_id
-  role    = "roles/pubsub.publisher"
-  member  = "serviceAccount:${data.google_storage_project_service_account.gcs_account.email_address}"
-}
-
 ## iam
 
 resource "google_service_account" "nlp" {
@@ -22,22 +5,22 @@ resource "google_service_account" "nlp" {
   display_name = "nlp Service Account"
 }
 
+// ocr_data is the nlp input
 resource "google_storage_bucket_iam_member" "nlp_data_viewer" {
-  // ocr_data is the nlp input
   bucket = google_storage_bucket.ocr_data.name
   role   = "roles/storage.objectViewer"
   member = "serviceAccount:${google_service_account.nlp.email}"
 }
 
+// nlp_data is the nlp output
 resource "google_storage_bucket_iam_member" "nlp_data_writer" {
-  // ocr_data is the nlp input
   bucket = google_storage_bucket.nlp_data.name
   role   = "roles/storage.objectUser"
   member = "serviceAccount:${google_service_account.nlp.email}"
 }
 
+// nlp_err is the nlp error output
 resource "google_storage_bucket_iam_member" "nlp_err_writer" {
-  // ocr_data is the nlp input
   bucket = google_storage_bucket.nlp_err.name
   role   = "roles/storage.objectUser"
   member = "serviceAccount:${google_service_account.nlp.email}"
@@ -87,7 +70,7 @@ resource "google_storage_bucket_object" "nlp_deploy" {
 resource "google_cloudfunctions2_function" "nlp" {
   name        = "nlp"
   location    = local.region
-  description = "nlp iterates through a bucket and creates a firestore document for each unique file"
+  description = "nlp performs NLP on the text extracted from the images"
   labels = {
     app = "nlp"
   }
@@ -119,13 +102,14 @@ resource "google_cloudfunctions2_function" "nlp" {
       GCP_PROJECT_ID  = var.project_id
       ERR_BUCKET_NAME = google_storage_bucket.nlp_err.name
       DST_BUCKET_NAME = google_storage_bucket.nlp_data.name
+      LOG_EXECUTION_ID = true
     }
   }
 
   event_trigger {
     trigger_region        = local.region
     event_type            = "google.cloud.storage.object.v1.finalized"
-    retry_policy          = "RETRY_POLICY_RETRY"
+    retry_policy          = "RETRY_POLICY_DO_NOT_RETRY" #"RETRY_POLICY_RETRY"
     service_account_email = google_service_account.nlp.email
 
     event_filters {
@@ -135,6 +119,6 @@ resource "google_cloudfunctions2_function" "nlp" {
   }
 }
 
-output "function_uri" {
+output "nlp_func_uri" {
   value = google_cloudfunctions2_function.nlp.service_config[0].uri
 }
